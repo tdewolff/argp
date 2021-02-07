@@ -48,7 +48,7 @@ func TestArgpTypes(t *testing.T) {
 
 	for _, tt := range argpTests {
 		t.Run(tt.args, func(t *testing.T) {
-			argp := NewArgp()
+			argp := NewArgp("description")
 
 			s := &STypes{}
 			err := argp.AddStruct(s)
@@ -89,7 +89,6 @@ func TestArgp(t *testing.T) {
 		{"-a -b -c5", SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
 		{"-abc5", SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
 		{"-- -abc5", SOptions{Baz: "default"}, "-abc5"},
-		{"-A", SOptions{Baz: "default", A: true}, ""},
 		{"--n-A_më val", SOptions{Baz: "default", Name: "val"}, ""},
 		{"--Baz=-", SOptions{Baz: "-"}, ""},
 		{"--Baz -", SOptions{Baz: "-"}, ""},
@@ -98,7 +97,7 @@ func TestArgp(t *testing.T) {
 
 	for _, tt := range argpTests {
 		t.Run(tt.args, func(t *testing.T) {
-			argp := NewArgp()
+			argp := NewArgp("description")
 
 			s := &SOptions{}
 			err := argp.AddStruct(s)
@@ -113,10 +112,10 @@ func TestArgp(t *testing.T) {
 }
 
 func TestArgpAdd(t *testing.T) {
-	argp := NewArgp()
+	argp := NewArgp("description")
 
 	var v int64
-	err := argp.Add(&v, "", "verb", 4)
+	err := argp.Add(&v, "", "verb", 4, "")
 	test.Error(t, err)
 
 	_, err = argp.parse([]string{"--verb", "8"})
@@ -129,22 +128,22 @@ func TestArgpAdd(t *testing.T) {
 }
 
 func TestArgpSub(t *testing.T) {
-	argp := NewArgp()
-	sub1 := NewArgp()
-	sub2 := NewArgp()
+	argp := NewArgp("description")
+	sub1 := NewArgp("first")
+	sub2 := NewArgp("second")
 	argp.AddCommand("first", sub1)
 	argp.AddCommand("second", sub2)
 
 	var a int
-	err := argp.Add(&a, "a", "", nil)
+	err := argp.Add(&a, "a", "", nil, "")
 	test.Error(t, err)
 
 	var b int
-	err = sub1.Add(&b, "b", "", nil)
+	err = sub1.Add(&b, "b", "", nil, "")
 	test.Error(t, err)
 
 	var c int
-	err = sub2.Add(&c, "c", "", nil)
+	err = sub2.Add(&c, "c", "", nil, "")
 	test.Error(t, err)
 
 	_, err = argp.parse([]string{"-a", "1"})

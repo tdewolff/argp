@@ -3,7 +3,9 @@ package argp
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -11,11 +13,12 @@ import (
 )
 
 type Var struct {
-	Value   reflect.Value
-	Kind    reflect.Kind
-	Long    string
-	Short   rune
-	Default interface{}
+	Value       reflect.Value
+	Kind        reflect.Kind
+	Long        string
+	Short       rune
+	Default     interface{}
+	Description string
 }
 
 func (v *Var) SetString(s string) error {
@@ -31,18 +34,35 @@ func (v *Var) Set(i interface{}) {
 	v.Value.Set(reflect.ValueOf(i).Convert(v.Value.Type()))
 }
 
-type Argp struct {
-	cmds map[string]*Argp
-	vars []*Var
-}
-
-func NewArgp() *Argp {
-	return &Argp{
-		cmds: map[string]*Argp{},
+func varCmp(vars []*Var) func(int, int) bool {
+	return func(i, j int) bool {
+		if vars[i].Short != 0 {
+			if vars[j].Short != 0 {
+				return vars[i].Short < vars[j].Short
+			} else {
+				return string(vars[i].Short) < vars[j].Long
+			}
+		} else if vars[j].Short != 0 {
+			return vars[i].Long < string(vars[j].Short)
+		}
+		return vars[i].Long < vars[j].Long
 	}
 }
 
-func (argp *Argp) Add(i interface{}, short, long string, def interface{}) error {
+type Argp struct {
+	cmds        map[string]*Argp
+	vars        []*Var
+	Description string
+}
+
+func NewArgp(description string) *Argp {
+	return &Argp{
+		cmds:        map[string]*Argp{},
+		Description: description,
+	}
+}
+
+func (argp *Argp) Add(i interface{}, short, long string, def interface{}, description string) error {
 	v := reflect.ValueOf(i)
 	if v.Type().Kind() != reflect.Ptr {
 		return fmt.Errorf("must pass pointer")
@@ -71,6 +91,7 @@ func (argp *Argp) Add(i interface{}, short, long string, def interface{}) error 
 	if def != nil {
 		variable.Default = def
 	}
+	variable.Description = description
 	argp.vars = append(argp.vars, variable)
 	return nil
 }
@@ -116,6 +137,9 @@ func (argp *Argp) AddStruct(i interface{}) error {
 				}
 				variable.Default = iDef
 			}
+			if description := tfield.Tag.Get("desc"); description != "" {
+				variable.Description = description
+			}
 			argp.vars = append(argp.vars, variable)
 		}
 	}
@@ -123,13 +147,101 @@ func (argp *Argp) AddStruct(i interface{}) error {
 }
 
 func (argp *Argp) AddCommand(cmd string, sub *Argp) {
-	argp.cmds[cmd] = sub
+	argp.cmds[strings.ToLower(cmd)] = sub
+}
+
+func (argp *Argp) PrintHelp() {
+	base := filepath.Base(os.Args[0])
+	for _, arg := range os.Args[1:] {
+		found := false
+		for cmd, sub := range argp.cmds {
+			if cmd == strings.ToLower(arg) {
+				base += " " + cmd
+				argp = sub
+				found = true
+				break
+			}
+		}
+		if !found {
+			break
+		}
+	}
+
+	if 0 < len(argp.cmds) {
+		fmt.Printf("Usage: %s [command] [options] [inputs]\n\n", base)
+		fmt.Printf("Commands:\n")
+		nMax := 0
+		for cmd, _ := range argp.cmds {
+			if nMax < 2+len(cmd) {
+				nMax = 2 + len(cmd)
+			}
+		}
+		if 29 < nMax {
+			nMax = 29
+		}
+		for cmd, sub := range argp.cmds {
+			n := 2 + len(cmd)
+			fmt.Printf("  %s", cmd)
+			if nMax < n {
+				fmt.Printf("\n")
+				n = 0
+			}
+			fmt.Printf("%s %s\n", strings.Repeat(" ", nMax-n), sub.Description)
+		}
+		fmt.Printf("\n")
+	} else {
+		fmt.Printf("Usage: %s [options] [inputs]\n\n", base)
+	}
+
+	options := make([]*Var, len(argp.vars))
+	copy(options, argp.vars)
+	sort.Slice(options, varCmp(options))
+
+	fmt.Printf("Options:\n")
+	nMax := 0
+	for _, v := range options {
+		n := 0
+		if v.Short != 0 {
+			n += 4
+			if v.Long != "" {
+				n += 4 + len(v.Long)
+			}
+		} else if v.Long != "" {
+			n += 8 + len(v.Long)
+		}
+		if nMax < n {
+			nMax = n
+		}
+	}
+	if 29 < nMax {
+		nMax = 29
+	}
+	for _, v := range options {
+		n := 0
+		if v.Short != 0 {
+			fmt.Printf("  -%s", string(v.Short))
+			n += 4
+			if v.Long != "" {
+				fmt.Printf(", --%s", v.Long)
+				n += 4 + len(v.Long)
+			}
+		} else if v.Long != "" {
+			fmt.Printf("      --%s", v.Long)
+			n += 8 + len(v.Long)
+		}
+		if nMax < n {
+			fmt.Printf("\n")
+			n = 0
+		}
+		fmt.Printf("%s %s\n", strings.Repeat(" ", nMax-n), v.Description)
+	}
 }
 
 func (argp *Argp) Parse() []string {
 	rest, err := argp.parse(os.Args[1:])
 	if err != nil {
 		fmt.Printf(err.Error())
+		argp.PrintHelp()
 		os.Exit(1)
 		return nil
 	}
@@ -137,7 +249,6 @@ func (argp *Argp) Parse() []string {
 }
 
 func (argp *Argp) findShort(short rune) *Var {
-	short = unicode.ToLower(short)
 	for _, v := range argp.vars {
 		if v.Short != 0 && v.Short == short {
 			return v
@@ -160,7 +271,7 @@ func (argp *Argp) parse(args []string) ([]string, error) {
 	// sub commands
 	if 0 < len(args) {
 		for cmd, sub := range argp.cmds {
-			if cmd == args[0] {
+			if cmd == strings.ToLower(args[0]) {
 				return sub.parse(args[1:])
 			}
 		}
