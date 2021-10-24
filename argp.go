@@ -12,6 +12,8 @@ import (
 	"unicode/utf8"
 )
 
+type Function func([]string) error
+
 type Var struct {
 	Value       reflect.Value
 	Kind        reflect.Kind
@@ -34,32 +36,22 @@ func (v *Var) Set(i interface{}) {
 	v.Value.Set(reflect.ValueOf(i).Convert(v.Value.Type()))
 }
 
-func varCmp(vars []*Var) func(int, int) bool {
-	return func(i, j int) bool {
-		if vars[i].Short != 0 {
-			if vars[j].Short != 0 {
-				return vars[i].Short < vars[j].Short
-			} else {
-				return string(vars[i].Short) < vars[j].Long
-			}
-		} else if vars[j].Short != 0 {
-			return vars[i].Long < string(vars[j].Short)
-		}
-		return vars[i].Long < vars[j].Long
-	}
-}
-
 type Argp struct {
-	cmds        map[string]*Argp
-	vars        []*Var
+	cmds map[string]*Argp
+	vars []*Var
+	Function
 	Description string
+
+	help bool
 }
 
-func NewArgp(description string) *Argp {
-	return &Argp{
+func New(description string) *Argp {
+	argp := &Argp{
 		cmds:        map[string]*Argp{},
 		Description: description,
 	}
+	argp.Add(&argp.help, "h", "help", nil, "Help")
+	return argp
 }
 
 func (argp *Argp) Add(i interface{}, short, long string, def interface{}, description string) error {
@@ -146,8 +138,11 @@ func (argp *Argp) AddStruct(i interface{}) error {
 	return nil
 }
 
-func (argp *Argp) AddCommand(cmd string, sub *Argp) {
+func (argp *Argp) AddCommand(fn Function, cmd string, description string) *Argp {
+	sub := New(description)
+	sub.Function = fn
 	argp.cmds[strings.ToLower(cmd)] = sub
+	return sub
 }
 
 func (argp *Argp) PrintHelp() {
@@ -170,80 +165,102 @@ func (argp *Argp) PrintHelp() {
 	if 0 < len(argp.cmds) {
 		fmt.Printf("Usage: %s [command] [options] [inputs]\n\n", base)
 		fmt.Printf("Commands:\n")
+
 		nMax := 0
+		cmds := []string{}
 		for cmd, _ := range argp.cmds {
 			if nMax < 2+len(cmd) {
 				nMax = 2 + len(cmd)
 			}
+			cmds = append(cmds, cmd)
 		}
-		if 29 < nMax {
-			nMax = 29
+		sort.Strings(cmds)
+
+		if 28 < nMax {
+			nMax = 28
+		} else if nMax < 10 {
+			nMax = 10
 		}
-		for cmd, sub := range argp.cmds {
+		for _, cmd := range cmds {
+			sub := argp.cmds[cmd]
 			n := 2 + len(cmd)
 			fmt.Printf("  %s", cmd)
 			if nMax < n {
 				fmt.Printf("\n")
 				n = 0
 			}
-			fmt.Printf("%s %s\n", strings.Repeat(" ", nMax-n), sub.Description)
+			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), sub.Description)
 		}
 		fmt.Printf("\n")
 	} else {
 		fmt.Printf("Usage: %s [options] [inputs]\n\n", base)
 	}
 
-	options := make([]*Var, len(argp.vars))
-	copy(options, argp.vars)
-	sort.Slice(options, varCmp(options))
+	if 0 < len(argp.vars) {
+		options := make([]*Var, len(argp.vars))
+		copy(options, argp.vars)
+		sort.Slice(options, varCmp(options))
 
-	fmt.Printf("Options:\n")
-	nMax := 0
-	for _, v := range options {
-		n := 0
-		if v.Short != 0 {
-			n += 4
-			if v.Long != "" {
-				n += 4 + len(v.Long)
+		fmt.Printf("Options:\n")
+		nMax := 0
+		for _, v := range options {
+			n := 0
+			if v.Short != 0 {
+				n += 4
+				if v.Long != "" {
+					n += 4 + len(v.Long)
+				}
+			} else if v.Long != "" {
+				n += 8 + len(v.Long)
 			}
-		} else if v.Long != "" {
-			n += 8 + len(v.Long)
-		}
-		if nMax < n {
-			nMax = n
-		}
-	}
-	if 29 < nMax {
-		nMax = 29
-	}
-	for _, v := range options {
-		n := 0
-		if v.Short != 0 {
-			fmt.Printf("  -%s", string(v.Short))
-			n += 4
-			if v.Long != "" {
-				fmt.Printf(", --%s", v.Long)
-				n += 4 + len(v.Long)
+			if nMax < n {
+				nMax = n
 			}
-		} else if v.Long != "" {
-			fmt.Printf("      --%s", v.Long)
-			n += 8 + len(v.Long)
 		}
-		if nMax < n {
-			fmt.Printf("\n")
-			n = 0
+		if 28 < nMax {
+			nMax = 28
+		} else if nMax < 10 {
+			nMax = 10
 		}
-		fmt.Printf("%s %s\n", strings.Repeat(" ", nMax-n), v.Description)
+		for _, v := range options {
+			n := 0
+			if v.Short != 0 {
+				fmt.Printf("  -%s", string(v.Short))
+				n += 4
+				if v.Long != "" {
+					fmt.Printf(", --%s", v.Long)
+					n += 4 + len(v.Long)
+				}
+			} else if v.Long != "" {
+				fmt.Printf("      --%s", v.Long)
+				n += 8 + len(v.Long)
+			}
+			if nMax < n {
+				fmt.Printf("\n")
+				n = 0
+			}
+			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), v.Description)
+		}
 	}
 }
 
 func (argp *Argp) Parse() []string {
-	rest, err := argp.parse(os.Args[1:])
+	sub, rest, err := argp.parse(os.Args[1:])
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Print(err, "\n\n")
 		argp.PrintHelp()
 		os.Exit(1)
-		return nil
+	} else if sub.help {
+		argp.PrintHelp()
+		os.Exit(0)
+	} else if sub.Function != nil {
+		err = sub.Function(rest)
+		if err != nil {
+			fmt.Print(err, "\n\n")
+			os.Exit(1)
+		} else {
+			os.Exit(0)
+		}
 	}
 	return rest
 }
@@ -267,7 +284,7 @@ func (argp *Argp) findLong(long string) *Var {
 	return nil
 }
 
-func (argp *Argp) parse(args []string) ([]string, error) {
+func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	// sub commands
 	if 0 < len(args) {
 		for cmd, sub := range argp.cmds {
@@ -300,25 +317,25 @@ func (argp *Argp) parse(args []string) ([]string, error) {
 
 					v := argp.findLong(name)
 					if v == nil {
-						return nil, fmt.Errorf("invalid option: %s", name)
+						return nil, nil, fmt.Errorf("unknown option --%s", name)
 					}
 					if err := v.SetString(value); err != nil {
-						return nil, fmt.Errorf("bad option %s: %v", name, err)
+						return nil, nil, fmt.Errorf("bad option --%s: %v", name, err)
 					}
 				} else {
 					v := argp.findLong(name)
 					if v == nil {
-						return nil, fmt.Errorf("invalid option: %s", name)
+						return nil, nil, fmt.Errorf("unknown option --%s", name)
 					} else if v.Kind == reflect.Bool {
 						if err := v.SetString(""); err != nil {
-							return nil, fmt.Errorf("bad option %s: %v", name, err)
+							return nil, nil, fmt.Errorf("bad option --%s: %v", name, err)
 						}
 					} else if len(args) <= i+1 {
-						return nil, fmt.Errorf("bad option %s: must have value", name)
+						return nil, nil, fmt.Errorf("bad option --%s: must have value", name)
 					} else {
 						i++
 						if err := v.SetString(args[i]); err != nil {
-							return nil, fmt.Errorf("bad option %s: %v", name, err)
+							return nil, nil, fmt.Errorf("bad option --%s: %v", name, err)
 						}
 					}
 				}
@@ -329,10 +346,10 @@ func (argp *Argp) parse(args []string) ([]string, error) {
 
 					v := argp.findShort(name)
 					if v == nil {
-						return nil, fmt.Errorf("invalid option: %c", name)
+						return nil, nil, fmt.Errorf("unknown option -%c", name)
 					} else if v.Kind == reflect.Bool {
 						if err := v.SetString(""); err != nil {
-							return nil, fmt.Errorf("bad option %c: %v", name, err)
+							return nil, nil, fmt.Errorf("bad option -%c: %v", name, err)
 						}
 					} else {
 						if j < len(arg) {
@@ -340,14 +357,14 @@ func (argp *Argp) parse(args []string) ([]string, error) {
 								j++
 							}
 							if err := v.SetString(arg[j:]); err != nil {
-								return nil, fmt.Errorf("bad option %c: %v", name, err)
+								return nil, nil, fmt.Errorf("bad option -%c: %v", name, err)
 							}
 						} else if len(args) <= i+1 {
-							return nil, fmt.Errorf("bad option %c: must have value", name)
+							return nil, nil, fmt.Errorf("bad option -%c: must have value", name)
 						} else {
 							i++
 							if err := v.SetString(args[i]); err != nil {
-								return nil, fmt.Errorf("bad option %c: %v", name, err)
+								return nil, nil, fmt.Errorf("bad option -%c: %v", name, err)
 							}
 						}
 						break
@@ -358,7 +375,7 @@ func (argp *Argp) parse(args []string) ([]string, error) {
 			rest = append(rest, arg)
 		}
 	}
-	return rest, nil
+	return argp, rest, nil
 }
 
 func parseVar(kind reflect.Kind, s string) (interface{}, error) {
@@ -405,4 +422,19 @@ func isValidName(s string) bool {
 		}
 	}
 	return true
+}
+
+func varCmp(vars []*Var) func(int, int) bool {
+	return func(i, j int) bool {
+		if vars[i].Short != 0 {
+			if vars[j].Short != 0 {
+				return vars[i].Short < vars[j].Short
+			} else {
+				return string(vars[i].Short) < vars[j].Long
+			}
+		} else if vars[j].Short != 0 {
+			return vars[i].Long < string(vars[j].Short)
+		}
+		return vars[i].Long < vars[j].Long
+	}
 }
