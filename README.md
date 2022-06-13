@@ -3,6 +3,20 @@ Command line argument parser following the GNU standard.
 
     ./test -vo out.png --size 256 input.txt
 
+with the following features:
+
+- arguments are options when they begin with a hyphen `-`
+- multiple options can be combined: `-abc` is the same as `-a -b -c`
+- long options start with two hyphens: `--abc` is one option
+- option names are alphanumeric characters
+- options can have a value: `-a 1` means that `a` has value `1`
+- option values can be separated by a space, equal sign, or nothing: `-a1 -a=1 -a 1` are all equal
+- options and non-options can be interleaved
+- the argument `--` terminates all options so that all following arguments are treated as non-options
+- a single `-` argument is a non-option usually used to mean standard in or out streams
+- options may be specified multiple times, only the last one determines its value
+- options can have multiple values: `-a 1 2 3` means that `a` is an array/slice/struct of three numbers of value `[1,2,3]`
+
 ## Installation
 Make sure you have [Git](https://git-scm.com/) and [Go](https://golang.org/dl/) (1.13 or higher) installed, run
 ```
@@ -24,6 +38,8 @@ import (
 A regular command with short and long options.
 
 ```go
+package main
+
 import "github.com/tdewolff/argp"
 
 func main() {
@@ -57,6 +73,8 @@ Options:
 Example with sub commands using a main command for when no sub command is used, and a sub command named "cmd". For the main command we can also use `New` and `AddOpt` instead and process the command after `argp.Parse()`.
 
 ```go
+package main
+
 import "github.com/tdewolff/argp"
 
 func main() {
