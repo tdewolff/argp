@@ -15,7 +15,7 @@ go get -u github.com/tdewolff/argp
 Then add the following import
 ``` go
 import (
-	"github.com/tdewolff/argp"
+    "github.com/tdewolff/argp"
 )
 ```
 
