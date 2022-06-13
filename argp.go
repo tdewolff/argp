@@ -12,19 +12,24 @@ import (
 	"unicode/utf8"
 )
 
-type Function func([]string) error
+// Count is a counting option, e.g. -vvv sets count to 3
+type Count int
 
+// Var is a command option or argument
 type Var struct {
 	Value       reflect.Value
-	Kind        reflect.Kind
+	Name        string
 	Long        string
 	Short       rune
+	Index       int
+	Rest        bool
 	Default     interface{}
 	Description string
 }
 
+// SetString sets the variable's value from a string
 func (v *Var) SetString(s string) error {
-	i, err := parseVar(v.Kind, s)
+	i, err := parseVar(v.Value.Kind(), s)
 	if err != nil {
 		return err
 	}
@@ -32,51 +37,176 @@ func (v *Var) SetString(s string) error {
 	return nil
 }
 
+// Set sets the variable's value
 func (v *Var) Set(i interface{}) {
 	v.Value.Set(reflect.ValueOf(i).Convert(v.Value.Type()))
 }
 
-type Argp struct {
-	cmds map[string]*Argp
-	vars []*Var
-	Function
-	Description string
-
-	help bool
+// Cmd is a command
+type Cmd interface {
+	Run() error
 }
 
+// Argp is a (sub) command parser
+type Argp struct {
+	Cmd
+	Description string
+
+	parent *Argp
+	name   string
+	vars   []*Var
+	cmds   map[string]*Argp
+	help   bool
+}
+
+// New returns a new command parser that can set options and returns the remaining arguments from `Argp.Parse`.
 func New(description string) *Argp {
+	return NewCmd(nil, description)
+}
+
+// NewCmd returns a new command parser that invokes the Run method of the passed command structure. The `Argp.Parse()` function will not return and call either os.Exit(0) or os.Exit(1).
+func NewCmd(cmd Cmd, description string) *Argp {
 	argp := &Argp{
-		cmds:        map[string]*Argp{},
+		Cmd:         cmd,
 		Description: description,
+		name:        filepath.Base(os.Args[0]),
+		cmds:        map[string]*Argp{},
 	}
-	argp.Add(&argp.help, "h", "help", nil, "Help")
+	if cmd != nil {
+		v := reflect.ValueOf(cmd)
+		if v.Type().Kind() != reflect.Ptr {
+			panic("must pass pointer to struct")
+		}
+		v = v.Elem()
+		if v.Type().Kind() != reflect.Struct {
+			panic("must pass pointer to struct")
+		}
+
+		maxIndex := -1
+		for j := 0; j < v.NumField(); j++ {
+			tfield := v.Type().Field(j)
+			vfield := v.Field(j)
+			if vfield.IsValid() {
+				variable := &Var{}
+				variable.Value = vfield
+				variable.Name = strings.ToLower(tfield.Name)
+				variable.Index = -1
+
+				name := tfield.Tag.Get("name")
+				long, hasLong := tfield.Tag.Lookup("long")
+				short := tfield.Tag.Get("short")
+				index := tfield.Tag.Get("index")
+				def := tfield.Tag.Get("default")
+				description := tfield.Tag.Get("desc")
+				if name != "" {
+					variable.Name = name
+				}
+				if !hasLong {
+					variable.Long = variable.Name
+				} else if long != "" {
+					if !isValidName(long) {
+						panic("option names must be unicode letters or numbers")
+					} else if argp.findLong(long) != nil {
+						panic(fmt.Sprintf("long option name already exists: --%v", long))
+					}
+					variable.Long = strings.ToLower(long)
+				}
+				if short != "" {
+					if !isValidName(short) {
+						panic("option names must be unicode letters or numbers")
+					}
+					r, n := utf8.DecodeRuneInString(short)
+					if len(short) != n || n == 0 {
+						panic("short option names must be one character long")
+					} else if argp.findShort(r) != nil {
+						panic(fmt.Sprintf("short option name already exists: -%v", string(r)))
+					}
+					variable.Short = r
+				}
+				if index != "" {
+					if long != "" || short != "" {
+						panic("can not set both long/short option names and index")
+					}
+					if index == "*" {
+						if argp.findRest() != nil {
+							panic("rest option already exists")
+						} else if def != "" {
+							panic("rest option can not have a default value")
+						} else if variable.Value.Kind() != reflect.Slice || variable.Value.Type().Elem().Kind() != reflect.String {
+							panic("rest option must be of type []string")
+						}
+						variable.Rest = true
+					} else {
+						i, err := strconv.Atoi(index)
+						if err != nil || i < 0 {
+							panic("index must be a non-negative integer or *")
+						} else if argp.findIndex(i) != nil {
+							panic(fmt.Sprintf("option index already exists: %v", i))
+						}
+						variable.Index = i
+						if maxIndex < i {
+							maxIndex = i
+						}
+					}
+				}
+				if def != "" {
+					iDef, err := parseVar(variable.Value.Kind(), def)
+					if err != nil {
+						panic(fmt.Sprintf("bad option default: %v", err))
+					}
+					variable.Default = iDef
+				}
+				if description != "" {
+					variable.Description = description
+				}
+				argp.vars = append(argp.vars, variable)
+			}
+		}
+		for i := 0; i <= maxIndex; i++ {
+			if argp.findIndex(i) == nil {
+				panic(fmt.Sprintf("option indices must be continuous: index %v is missing", i))
+			}
+		}
+	}
+	if argp.findLong("help") == nil {
+		if argp.findShort('h') == nil {
+			argp.AddOpt(&argp.help, "h", "help", nil, "Help")
+		} else {
+			argp.AddOpt(&argp.help, "", "help", nil, "Help")
+		}
+	}
 	return argp
 }
 
-func (argp *Argp) Add(i interface{}, short, long string, def interface{}, description string) error {
+// AddOpt adds an option
+func (argp *Argp) AddOpt(i interface{}, short, long string, def interface{}, description string) {
 	v := reflect.ValueOf(i)
 	if v.Type().Kind() != reflect.Ptr {
-		return fmt.Errorf("must pass pointer")
+		panic("must pass pointer")
 	}
 	v = v.Elem()
 
 	variable := &Var{}
 	variable.Value = v
-	variable.Kind = v.Kind()
+	variable.Index = -1
+
 	if long != "" {
 		if !isValidName(long) {
-			return fmt.Errorf("option names must be unicode letters or numbers")
+			panic("option names must be unicode letters or numbers")
+		} else if argp.findLong(long) != nil {
+			panic(fmt.Sprintf("long option name already exists: --%v", long))
 		}
 		variable.Long = strings.ToLower(long)
 	}
 	if short != "" {
 		if !isValidName(short) {
-			return fmt.Errorf("option names must be unicode letters or numbers")
+			panic("option names must be unicode letters or numbers")
 		}
 		r, n := utf8.DecodeRuneInString(short)
 		if len(short) != n || n == 0 {
-			return fmt.Errorf("short option names must be one character long")
+			panic("short option names must be one character long")
+		} else if argp.findShort(r) != nil {
+			panic(fmt.Sprintf("short option name already exists: -%v", string(r)))
 		}
 		variable.Short = r
 	}
@@ -85,123 +215,63 @@ func (argp *Argp) Add(i interface{}, short, long string, def interface{}, descri
 	}
 	variable.Description = description
 	argp.vars = append(argp.vars, variable)
-	return nil
 }
 
-func (argp *Argp) AddStruct(i interface{}) error {
-	v := reflect.ValueOf(i)
-	if v.Type().Kind() != reflect.Ptr {
-		return fmt.Errorf("must pass pointer to struct")
-	}
-	v = v.Elem()
-	if v.Type().Kind() != reflect.Struct {
-		return fmt.Errorf("must pass pointer to struct")
+// AddCmd adds a sub command
+func (argp *Argp) AddCmd(cmd Cmd, name, description string) *Argp {
+	if _, ok := argp.cmds[name]; ok {
+		panic(fmt.Sprintf("command already exists: %v", name))
+	} else if len(name) == 0 || name[0] == '-' {
+		panic("invalid command name")
 	}
 
-	for j := 0; j < v.NumField(); j++ {
-		tfield := v.Type().Field(j)
-		vfield := v.Field(j)
-		if vfield.IsValid() {
-			variable := &Var{}
-			variable.Value = vfield
-			variable.Kind = vfield.Kind()
-			variable.Long = strings.ToLower(tfield.Name)
-			if long := tfield.Tag.Get("long"); long != "" {
-				if !isValidName(long) {
-					return fmt.Errorf("option names must be unicode letters or numbers")
-				}
-				variable.Long = strings.ToLower(long)
-			}
-			if short := tfield.Tag.Get("short"); short != "" {
-				if !isValidName(short) {
-					return fmt.Errorf("option names must be unicode letters or numbers")
-				}
-				r, n := utf8.DecodeRuneInString(short)
-				if len(short) != n || n == 0 {
-					return fmt.Errorf("short option names must be one character long")
-				}
-				variable.Short = r
-			}
-			if def := tfield.Tag.Get("default"); def != "" {
-				iDef, err := parseVar(variable.Kind, def)
-				if err != nil {
-					return fmt.Errorf("bad option default: %w", err)
-				}
-				variable.Default = iDef
-			}
-			if description := tfield.Tag.Get("desc"); description != "" {
-				variable.Description = description
-			}
-			argp.vars = append(argp.vars, variable)
-		}
-	}
-	return nil
-}
-
-func (argp *Argp) AddCommand(fn Function, cmd string, description string) *Argp {
-	sub := New(description)
-	sub.Function = fn
-	argp.cmds[strings.ToLower(cmd)] = sub
+	sub := NewCmd(cmd, description)
+	sub.parent = argp
+	sub.name = name
+	argp.cmds[strings.ToLower(name)] = sub
 	return sub
 }
 
+// PrintHelp prints the help overview. This is automatically called when unknown or bad options are passed, but you can call this explicitly in other cases.
 func (argp *Argp) PrintHelp() {
-	base := filepath.Base(os.Args[0])
-	for _, arg := range os.Args[1:] {
-		found := false
-		for cmd, sub := range argp.cmds {
-			if cmd == strings.ToLower(arg) {
-				base += " " + cmd
-				argp = sub
-				found = true
-				break
-			}
-		}
-		if !found {
-			break
-		}
+	base := argp.name
+	parent := argp.parent
+	for parent != nil {
+		base = parent.name + " " + base
+		parent = parent.parent
 	}
 
+	options := []*Var{}
+	arguments := []*Var{}
+	for _, v := range argp.vars {
+		if v.Index != -1 || v.Rest {
+			arguments = append(arguments, v)
+		} else {
+			options = append(options, v)
+		}
+	}
+	sort.Slice(options, optionCmp(options))
+	sort.Slice(arguments, argumentCmp(arguments))
+
+	args := ""
+	if 0 < len(options) {
+		args += " [options]"
+	}
 	if 0 < len(argp.cmds) {
-		fmt.Printf("Usage: %s [command] [options] [inputs]\n\n", base)
-		fmt.Printf("Commands:\n")
-
-		nMax := 0
-		cmds := []string{}
-		for cmd, _ := range argp.cmds {
-			if nMax < 2+len(cmd) {
-				nMax = 2 + len(cmd)
-			}
-			cmds = append(cmds, cmd)
-		}
-		sort.Strings(cmds)
-
-		if 28 < nMax {
-			nMax = 28
-		} else if nMax < 10 {
-			nMax = 10
-		}
-		for _, cmd := range cmds {
-			sub := argp.cmds[cmd]
-			n := 2 + len(cmd)
-			fmt.Printf("  %s", cmd)
-			if nMax < n {
-				fmt.Printf("\n")
-				n = 0
-			}
-			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), sub.Description)
-		}
-		fmt.Printf("\n")
+		fmt.Printf("Usage: %s%s [command] ...\n", base, args)
 	} else {
-		fmt.Printf("Usage: %s [options] [inputs]\n\n", base)
+		for _, v := range arguments {
+			if v.Rest {
+				args += " [" + v.Long + "...]"
+			} else {
+				args += " [" + v.Long + "]"
+			}
+		}
+		fmt.Printf("Usage: %s%s\n", base, args)
 	}
 
-	if 0 < len(argp.vars) {
-		options := make([]*Var, len(argp.vars))
-		copy(options, argp.vars)
-		sort.Slice(options, varCmp(options))
-
-		fmt.Printf("Options:\n")
+	if 0 < len(options) {
+		fmt.Printf("\nOptions:\n")
 		nMax := 0
 		for _, v := range options {
 			n := 0
@@ -242,21 +312,78 @@ func (argp *Argp) PrintHelp() {
 			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), v.Description)
 		}
 	}
+
+	if 0 < len(argp.cmds) {
+		fmt.Printf("\nCommands:\n")
+		nMax := 0
+		cmds := []string{}
+		for cmd, _ := range argp.cmds {
+			if nMax < 2+len(cmd) {
+				nMax = 2 + len(cmd)
+			}
+			cmds = append(cmds, cmd)
+		}
+		sort.Strings(cmds)
+
+		if 28 < nMax {
+			nMax = 28
+		} else if nMax < 10 {
+			nMax = 10
+		}
+		for _, cmd := range cmds {
+			sub := argp.cmds[cmd]
+			n := 2 + len(cmd)
+			fmt.Printf("  %s", cmd)
+			if nMax < n {
+				fmt.Printf("\n")
+				n = 0
+			}
+			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), sub.Description)
+		}
+		fmt.Printf("\n")
+	} else if 0 < len(arguments) {
+		fmt.Printf("\nArguments:\n")
+		nMax := 0
+		for _, v := range options {
+			n := 2 + len(v.Name)
+			if nMax < n {
+				nMax = n
+			}
+		}
+		if 28 < nMax {
+			nMax = 28
+		} else if nMax < 10 {
+			nMax = 10
+		}
+		for _, v := range arguments {
+			n := 2 + len(v.Name)
+			fmt.Printf("  %s", v.Name)
+			if nMax < n {
+				fmt.Printf("\n")
+				n = 0
+			}
+			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), v.Description)
+		}
+	}
 }
 
+// Parse parses the command line arguments and returns the remaining unparsed arguments. When the main command was instantiated with `NewCmd` instead, this command will not return and you need to catch the remaining arguments with `index="*"` in the struct tag.
 func (argp *Argp) Parse() []string {
 	sub, rest, err := argp.parse(os.Args[1:])
 	if err != nil {
-		fmt.Print(err, "\n\n")
-		argp.PrintHelp()
+		fmt.Printf("%v\n\n", err)
+		sub.PrintHelp()
 		os.Exit(1)
 	} else if sub.help {
-		argp.PrintHelp()
+		sub.PrintHelp()
 		os.Exit(0)
-	} else if sub.Function != nil {
-		err = sub.Function(rest)
-		if err != nil {
-			fmt.Print(err, "\n\n")
+	} else if sub.Cmd != nil {
+		if len(rest) != 0 {
+			fmt.Printf("unknown arguments: %v\n\n", strings.Join(rest, " "))
+			sub.PrintHelp()
+			os.Exit(1)
+		} else if err := sub.Cmd.Run(); err != nil {
+			fmt.Printf("%v\n\n", err)
 			os.Exit(1)
 		} else {
 			os.Exit(0)
@@ -278,6 +405,24 @@ func (argp *Argp) findLong(long string) *Var {
 	long = strings.ToLower(long)
 	for _, v := range argp.vars {
 		if v.Long != "" && v.Long == long {
+			return v
+		}
+	}
+	return nil
+}
+
+func (argp *Argp) findIndex(index int) *Var {
+	for _, v := range argp.vars {
+		if v.Index == index {
+			return v
+		}
+	}
+	return nil
+}
+
+func (argp *Argp) findRest() *Var {
+	for _, v := range argp.vars {
+		if v.Rest {
 			return v
 		}
 	}
@@ -317,25 +462,25 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 
 					v := argp.findLong(name)
 					if v == nil {
-						return nil, nil, fmt.Errorf("unknown option --%s", name)
+						return argp, nil, fmt.Errorf("unknown option --%s", name)
 					}
 					if err := v.SetString(value); err != nil {
-						return nil, nil, fmt.Errorf("bad option --%s: %v", name, err)
+						return argp, nil, fmt.Errorf("bad option --%s: %v", name, err)
 					}
 				} else {
 					v := argp.findLong(name)
 					if v == nil {
-						return nil, nil, fmt.Errorf("unknown option --%s", name)
-					} else if v.Kind == reflect.Bool {
-						if err := v.SetString(""); err != nil {
-							return nil, nil, fmt.Errorf("bad option --%s: %v", name, err)
+						return argp, nil, fmt.Errorf("unknown option --%s", name)
+					} else if v.Value.Kind() == reflect.Bool {
+						if err := v.SetString("true"); err != nil {
+							return argp, nil, fmt.Errorf("bad option --%s: %v", name, err)
 						}
 					} else if len(args) <= i+1 {
-						return nil, nil, fmt.Errorf("bad option --%s: must have value", name)
+						return argp, nil, fmt.Errorf("bad option --%s: must have value", name)
 					} else {
 						i++
 						if err := v.SetString(args[i]); err != nil {
-							return nil, nil, fmt.Errorf("bad option --%s: %v", name, err)
+							return argp, nil, fmt.Errorf("bad option --%s: %v", name, err)
 						}
 					}
 				}
@@ -346,10 +491,10 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 
 					v := argp.findShort(name)
 					if v == nil {
-						return nil, nil, fmt.Errorf("unknown option -%c", name)
-					} else if v.Kind == reflect.Bool {
-						if err := v.SetString(""); err != nil {
-							return nil, nil, fmt.Errorf("bad option -%c: %v", name, err)
+						return argp, nil, fmt.Errorf("unknown option -%c", name)
+					} else if v.Value.Kind() == reflect.Bool {
+						if err := v.SetString("true"); err != nil {
+							return argp, nil, fmt.Errorf("bad option -%c: %v", name, err)
 						}
 					} else {
 						if j < len(arg) {
@@ -357,14 +502,14 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 								j++
 							}
 							if err := v.SetString(arg[j:]); err != nil {
-								return nil, nil, fmt.Errorf("bad option -%c: %v", name, err)
+								return argp, nil, fmt.Errorf("bad option -%c: %v", name, err)
 							}
 						} else if len(args) <= i+1 {
-							return nil, nil, fmt.Errorf("bad option -%c: must have value", name)
+							return argp, nil, fmt.Errorf("bad option -%c: must have value", name)
 						} else {
 							i++
 							if err := v.SetString(args[i]); err != nil {
-								return nil, nil, fmt.Errorf("bad option -%c: %v", name, err)
+								return argp, nil, fmt.Errorf("bad option -%c: %v", name, err)
 							}
 						}
 						break
@@ -375,6 +520,27 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 			rest = append(rest, arg)
 		}
 	}
+
+	if 0 < len(rest) {
+		// indexed arguments
+		for index, arg := range rest {
+			v := argp.findIndex(index)
+			if v == nil {
+				rest = rest[index:]
+				break
+			}
+			if err := v.SetString(arg); err != nil {
+				return argp, nil, fmt.Errorf("bad option: %v", err)
+			}
+		}
+
+		// rest arguments
+		v := argp.findRest()
+		if v != nil {
+			v.Set(rest)
+			rest = rest[:0]
+		}
+	}
 	return argp, rest, nil
 }
 
@@ -383,9 +549,6 @@ func parseVar(kind reflect.Kind, s string) (interface{}, error) {
 	case reflect.String:
 		return s, nil
 	case reflect.Bool:
-		if s == "" {
-			return true, nil
-		}
 		return strconv.ParseBool(s)
 	case reflect.Int:
 		return strconv.ParseInt(s, 10, 0)
@@ -424,7 +587,7 @@ func isValidName(s string) bool {
 	return true
 }
 
-func varCmp(vars []*Var) func(int, int) bool {
+func optionCmp(vars []*Var) func(int, int) bool {
 	return func(i, j int) bool {
 		if vars[i].Short != 0 {
 			if vars[j].Short != 0 {
@@ -436,5 +599,16 @@ func varCmp(vars []*Var) func(int, int) bool {
 			return vars[i].Long < string(vars[j].Short)
 		}
 		return vars[i].Long < vars[j].Long
+	}
+}
+
+func argumentCmp(vars []*Var) func(int, int) bool {
+	return func(i, j int) bool {
+		if vars[i].Rest {
+			return false
+		} else if vars[j].Rest {
+			return true
+		}
+		return vars[i].Index < vars[j].Index
 	}
 }
