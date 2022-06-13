@@ -569,7 +569,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 func parseVar(t reflect.Type, s []string) (interface{}, int, error) {
 	switch t.Kind() {
 	case reflect.String:
-		return s, 1, nil
+		return s[0], 1, nil
 	case reflect.Bool:
 		i, err := strconv.ParseBool(s[0])
 		if err != nil {
@@ -650,7 +650,7 @@ func parseVar(t reflect.Type, s []string) (interface{}, int, error) {
 		return i, 1, nil
 	case reflect.Array:
 		k := 0
-		array := reflect.New(reflect.ArrayOf(t.Len(), t.Elem())).Elem()
+		v := reflect.New(t).Elem()
 		for j := 0; j < t.Len(); j++ {
 			if len(s) <= k {
 				return nil, 0, fmt.Errorf("missing values")
@@ -659,13 +659,13 @@ func parseVar(t reflect.Type, s []string) (interface{}, int, error) {
 			if err != nil {
 				return nil, 0, err
 			}
-			array.Index(j).Set(reflect.ValueOf(i).Convert(t.Elem()))
+			v.Index(j).Set(reflect.ValueOf(i).Convert(t.Elem()))
 			k += n
 		}
-		return array.Interface(), k, nil
+		return v.Interface(), k, nil
 	case reflect.Slice:
 		k := 0
-		islice := []interface{}{}
+		slice := []interface{}{}
 		for k < len(s) {
 			i, n, err := parseVar(t.Elem(), s[k:])
 			if err != nil {
@@ -674,17 +674,33 @@ func parseVar(t reflect.Type, s []string) (interface{}, int, error) {
 				}
 				break
 			}
-			islice = append(islice, i)
+			slice = append(slice, i)
 			k += n
 		}
-		if len(islice) == 0 {
+		if len(slice) == 0 {
 			return nil, 0, fmt.Errorf("missing values")
 		}
-		slice := reflect.MakeSlice(reflect.SliceOf(t.Elem()), len(islice), len(islice))
-		for j, i := range islice {
-			slice.Index(j).Set(reflect.ValueOf(i).Convert(t.Elem()))
+		v := reflect.MakeSlice(t, len(slice), len(slice))
+		for j, i := range slice {
+			v.Index(j).Set(reflect.ValueOf(i).Convert(t.Elem()))
 		}
-		return slice.Interface(), k, nil
+		return v.Interface(), k, nil
+	case reflect.Struct:
+		k := 0
+		v := reflect.New(t).Elem()
+		for j := 0; j < t.NumField(); j++ {
+			if len(s) <= k {
+				return nil, 0, fmt.Errorf("missing values")
+			}
+			i, n, err := parseVar(t.Field(j).Type, s[k:])
+			if err != nil {
+				return nil, 0, err
+			}
+			v.Field(j).Set(reflect.ValueOf(i).Convert(t.Field(j).Type))
+			k += n
+		}
+		return v.Interface(), k, nil
+
 	}
 	panic(fmt.Sprintf("unsupported type %s", t)) // should never happen
 }
@@ -702,13 +718,22 @@ func isValidType(t reflect.Type) bool {
 	if t == reflect.TypeOf(Count(0)) {
 		return true
 	}
-CheckType:
+	return isValidSubType(t)
+}
+
+func isValidSubType(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.String, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
 		return true
 	case reflect.Array, reflect.Slice:
-		t = t.Elem()
-		goto CheckType // check element type, but cannot be Count
+		return isValidSubType(t.Elem())
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			if !isValidSubType(t.Field(i).Type) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }

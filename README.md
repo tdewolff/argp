@@ -91,9 +91,19 @@ Composite types
 ```go
 var v [2]int // element can be any valid basic or composite type
 argp.AddOpt(&v, "v", "var", "4 2", "description")
+// value: [2]int{4, 2}
 
 var v []int // element can be any valid basic or composite type
-argp.AddOpt(&v, "v", "var", "4", "description")
+argp.AddOpt(&v, "v", "var", "4 2 1", "description")
+// value: []int{4, 2, 1}
+
+var v struct {
+    S string
+    I int
+    B [2]bool
+} // fields can be any valid basic or composite type
+argp.AddOpt(&v, "v", "var", "string 42 0 1", "description")
+// value: struct{S string, I int, B [2]bool}{"string", 42, false, true}
 ```
 
 ### Option tags
