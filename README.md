@@ -69,6 +69,7 @@ func (cmd *Command) Run() error {
 ```
 
 ### Options
+Basic types
 ```go
 var v string
 argp.AddOpt(&v, "v", "var", "default", "description")
@@ -84,6 +85,15 @@ argp.AddOpt(&v, "v", "var", "42", "description")
 
 var v float64 // also: float32
 argp.AddOpt(&v, "v", "var", "4.2", "description")
+```
+
+Composite types
+```go
+var v [2]int // element can be any valid basic or composite type
+argp.AddOpt(&v, "v", "var", "4 2", "description")
+
+var v []int // element can be any valid basic or composite type
+argp.AddOpt(&v, "v", "var", "4", "description")
 ```
 
 ### Option tags
