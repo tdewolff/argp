@@ -3,6 +3,22 @@ Command line argument parser following the GNU standard.
 
     ./test -vo out.png --size 256 input.txt
 
+## Installation
+Make sure you have [Git](https://git-scm.com/) and [Go](https://golang.org/dl/) (1.13 or higher) installed, run
+```
+mkdir Project
+cd Project
+go mod init
+go get -u github.com/tdewolff/argp
+```
+
+Then add the following import
+``` go
+import (
+	"github.com/tdewolff/argp"
+)
+```
+
 ## Examples
 ### Default usage
 A regular command with short and long options.
@@ -119,3 +135,6 @@ type Command struct {
     Var3 []string `name:"rest" index:"*"`
 }
 ```
+
+## License
+Released under the [MIT license](LICENSE.md).
