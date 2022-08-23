@@ -396,7 +396,7 @@ func (argp *Argp) Parse() []string {
 			sub.PrintHelp()
 			os.Exit(1)
 		} else if err := sub.Cmd.Run(); err != nil {
-			fmt.Printf("%v\n\n", err)
+			fmt.Printf("ERROR: %v\n", err)
 			os.Exit(1)
 		} else {
 			os.Exit(0)
@@ -545,16 +545,18 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 
 	if 0 < len(rest) {
 		// indexed arguments
-		for index, arg := range rest {
+		index := 0
+		for _, arg := range rest {
 			v := argp.findIndex(index)
 			if v == nil {
-				rest = rest[index:]
 				break
 			}
 			if _, err := v.SetString(arg); err != nil {
 				return argp, nil, fmt.Errorf("argument %d: %v", index, err)
 			}
+			index++
 		}
+		rest = rest[index:]
 
 		// rest arguments
 		v := argp.findRest()
