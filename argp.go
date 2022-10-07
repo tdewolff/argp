@@ -12,6 +12,9 @@ import (
 	"unicode/utf8"
 )
 
+// ShowUsage can be returned from a command to show the help message.
+var ShowUsage error = fmt.Errorf("bad command usage")
+
 // Count is a counting option, e.g. -vvv sets count to 3
 type Count int
 
@@ -20,11 +23,21 @@ type Var struct {
 	Value       reflect.Value
 	Name        string
 	Long        string
-	Short       rune
-	Index       int
+	Short       rune // 0 if not used
+	Index       int  // -1 if not used
 	Rest        bool
-	Default     interface{}
+	Default     interface{} // nil is not used
 	Description string
+}
+
+// IsOption returns true for an option
+func (v *Var) IsOption() bool {
+	return !v.IsArgument()
+}
+
+// IsArgument returns true for an argument
+func (v *Var) IsArgument() bool {
+	return v.Index != -1 || v.Rest
 }
 
 // SetString sets the variable's value from a string
@@ -167,9 +180,16 @@ func NewCmd(cmd Cmd, description string) *Argp {
 				argp.vars = append(argp.vars, variable)
 			}
 		}
+		optionalIndex := -1
 		for i := 0; i <= maxIndex; i++ {
-			if argp.findIndex(i) == nil {
+			if v := argp.findIndex(i); v == nil {
 				panic(fmt.Sprintf("option indices must be continuous: index %v is missing", i))
+			} else if v.Default != nil {
+				if optionalIndex == -1 {
+					optionalIndex = i
+				}
+			} else if optionalIndex != -1 {
+				panic(fmt.Sprintf("required options cannot follow optional ones: index %v is required but %v is optional", i, optionalIndex))
 			}
 		}
 	}
@@ -253,7 +273,7 @@ func (argp *Argp) PrintHelp() {
 	options := []*Var{}
 	arguments := []*Var{}
 	for _, v := range argp.vars {
-		if v.Index != -1 || v.Rest {
+		if v.IsArgument() {
 			arguments = append(arguments, v)
 		} else {
 			options = append(options, v)
@@ -268,7 +288,8 @@ func (argp *Argp) PrintHelp() {
 	}
 	if 0 < len(argp.cmds) {
 		fmt.Printf("Usage: %s%s [command] ...\n", base, args)
-	} else {
+	}
+	if 0 < len(arguments) {
 		for _, v := range arguments {
 			if v.Rest {
 				args += " [" + v.Long + "...]"
@@ -349,8 +370,9 @@ func (argp *Argp) PrintHelp() {
 			}
 			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), sub.Description)
 		}
-		fmt.Printf("\n")
-	} else if 0 < len(arguments) {
+	}
+
+	if 0 < len(arguments) {
 		fmt.Printf("\nArguments:\n")
 		nMax := 0
 		for _, v := range options {
@@ -396,7 +418,11 @@ func (argp *Argp) Parse() []string {
 			sub.PrintHelp()
 			os.Exit(1)
 		} else if err := sub.Cmd.Run(); err != nil {
-			fmt.Printf("ERROR: %v\n", err)
+			if err == ShowUsage {
+				sub.PrintHelp()
+			} else {
+				fmt.Printf("ERROR: %v\n", err)
+			}
 			os.Exit(1)
 		} else {
 			os.Exit(0)
@@ -453,9 +479,13 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	}
 
 	// set default
+	requiredIndices := 0
 	for _, v := range argp.vars {
 		if v.Default != nil {
 			v.Set(v.Default)
+			if v.Index != -1 && requiredIndices < v.Index {
+				requiredIndices = v.Index
+			}
 		}
 	}
 
@@ -543,27 +573,29 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		}
 	}
 
-	if 0 < len(rest) {
-		// indexed arguments
-		index := 0
-		for _, arg := range rest {
-			v := argp.findIndex(index)
-			if v == nil {
-				break
-			}
-			if _, err := v.SetString(arg); err != nil {
-				return argp, nil, fmt.Errorf("argument %d: %v", index, err)
-			}
-			index++
+	// indexed arguments
+	index := 0
+	for _, arg := range rest {
+		v := argp.findIndex(index)
+		if v == nil {
+			break
 		}
-		rest = rest[index:]
+		if _, err := v.SetString(arg); err != nil {
+			return argp, nil, fmt.Errorf("argument %d: %v", index, err)
+		}
+		index++
+	}
+	if index < requiredIndices {
+		v := argp.findIndex(index)
+		return argp, nil, fmt.Errorf("argument %v is missing", v.Name)
+	}
+	rest = rest[index:]
 
-		// rest arguments
-		v := argp.findRest()
-		if v != nil {
-			v.Set(rest)
-			rest = rest[:0]
-		}
+	// rest arguments
+	v := argp.findRest()
+	if v != nil {
+		v.Set(rest)
+		rest = rest[:0]
 	}
 	return argp, rest, nil
 }
