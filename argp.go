@@ -2,6 +2,7 @@ package argp
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -70,6 +71,8 @@ type Argp struct {
 	vars   []*Var
 	cmds   map[string]*Argp
 	help   bool
+
+	Error *log.Logger
 }
 
 // New returns a new command parser that can set options and returns the remaining arguments from `Argp.Parse`.
@@ -420,6 +423,8 @@ func (argp *Argp) Parse() []string {
 		} else if err := sub.Cmd.Run(); err != nil {
 			if err == ShowUsage {
 				sub.PrintHelp()
+			} else if argp.Error != nil {
+				argp.Error.Println(err)
 			} else {
 				fmt.Printf("ERROR: %v\n", err)
 			}

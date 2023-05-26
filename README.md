@@ -5,6 +5,13 @@ Command line argument parser following the GNU standard.
 
 with the following features:
 
+- build-in help (`-h` and `--help`) message
+- scan arguments into struct fields with configuration in tags
+- scan into composite field types (arrays, slices, structs)
+- allow for nested sub commands
+
+GNU command line argument rules:
+
 - arguments are options when they begin with a hyphen `-`
 - multiple options can be combined: `-abc` is the same as `-a -b -c`
 - long options start with two hyphens: `--abc` is one option
@@ -16,6 +23,8 @@ with the following features:
 - a single `-` argument is a non-option usually used to mean standard in or out streams
 - options may be specified multiple times, only the last one determines its value
 - options can have multiple values: `-a 1 2 3` means that `a` is an array/slice/struct of three numbers of value `[1,2,3]`
+
+*See also [github.com/tdewolff/prompt](https://github.com/tdewolff/prompt) for a command line prompter.*
 
 ## Installation
 Make sure you have [Git](https://git-scm.com/) and [Go](https://golang.org/dl/) (1.13 or higher) installed, run
@@ -151,6 +160,11 @@ type Command struct {
     Var1 int `short:"v" long:"var" default:"42" desc:"Description"`
     Var2 float64 `name:"first" index:"0" default:"4.2"`
     Var3 []string `name:"rest" index:"*"`
+}
+
+func (cmd *Command) Run() error {
+    // run command
+    return nil
 }
 ```
 
