@@ -149,6 +149,15 @@ argp.AddOpt(&v, "v", "var", "string 42 0 1", "description")
 // value: struct{S string, I int, B [2]bool}{"string", 42, false, true}
 ```
 
+Count type
+```go
+var v argp.Count
+argp.AddOpt(&v, "v","var", 0, "description")
+// Count the number of times flag is present
+// -v -v / -vv / --var --var  =>  2
+// or: -v 5  =>  5
+```
+
 ### Option tags
 The following struct will accept the following options and arguments:
 - `-v` or `--var` with a default value of 42

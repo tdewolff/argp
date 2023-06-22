@@ -7,6 +7,13 @@ import (
 	"github.com/tdewolff/test"
 )
 
+type STypesStruct struct {
+	Bool   bool
+	Struct struct {
+		Float64 float64
+	}
+}
+
 type STypes struct {
 	String  string
 	Bool    bool
@@ -22,42 +29,52 @@ type STypes struct {
 	Uint64  uint64
 	Float32 float32
 	Float64 float64
+	Array   [3]int
+	Slice   []string
+	Struct  STypesStruct
+}
+
+func (_ *STypes) Run() error {
+	return nil
 }
 
 func TestArgpTypes(t *testing.T) {
 	argpTests := []struct {
 		args string
 		s    STypes
-		rest string
 	}{
-		{"--string val", STypes{String: "val"}, ""},
-		{"--bool", STypes{Bool: true}, ""},
-		{"--int 36", STypes{Int: 36}, ""},
-		{"--int8 36", STypes{Int8: 36}, ""},
-		{"--int16 36", STypes{Int16: 36}, ""},
-		{"--int32 36", STypes{Int32: 36}, ""},
-		{"--int64 36", STypes{Int64: 36}, ""},
-		{"--uint 36", STypes{Uint: 36}, ""},
-		{"--uint8 36", STypes{Uint8: 36}, ""},
-		{"--uint16 36", STypes{Uint16: 36}, ""},
-		{"--uint32 36", STypes{Uint32: 36}, ""},
-		{"--uint64 36", STypes{Uint64: 36}, ""},
-		{"--float32 36", STypes{Float32: 36}, ""},
-		{"--float64 36", STypes{Float64: 36}, ""},
+		{"--string val", STypes{String: "val"}},
+		{"--bool", STypes{Bool: true}},
+		{"--int 36", STypes{Int: 36}},
+		{"--int8 36", STypes{Int8: 36}},
+		{"--int16 36", STypes{Int16: 36}},
+		{"--int32 36", STypes{Int32: 36}},
+		{"--int64 36", STypes{Int64: 36}},
+		{"--uint 36", STypes{Uint: 36}},
+		{"--uint8 36", STypes{Uint8: 36}},
+		{"--uint16 36", STypes{Uint16: 36}},
+		{"--uint32 36", STypes{Uint32: 36}},
+		{"--uint64 36", STypes{Uint64: 36}},
+		{"--float32 36", STypes{Float32: 36}},
+		{"--float64 36", STypes{Float64: 36}},
+		{"--array 1 2 3", STypes{Array: [3]int{1, 2, 3}}},
+		{"--slice foo bar", STypes{Slice: []string{"foo", "bar"}}},
+		// TODO: think of how to parse arrays/slices/structs, with comma, brackets, or both?
+		//{"--slice foo,bar", STypes{Slice: []string{"foo", "bar"}}},
+		//{"--slice [foo bar]", STypes{Slice: []string{"foo", "bar"}}},
+		{"--struct true 5.0", STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
+		//{"--struct [true 5.0]", STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
+		//{"--struct.bool true --struct.struct.float64 5.0", STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
 	}
 
 	for _, tt := range argpTests {
 		t.Run(tt.args, func(t *testing.T) {
-			argp := NewArgp("description")
-
-			s := &STypes{}
-			err := argp.AddStruct(s)
+			s := STypes{}
+			argp := NewCmd(&s, "description")
+			_, rest, err := argp.parse(strings.Split(tt.args, " "))
 			test.Error(t, err)
-
-			rest, err := argp.parse(strings.Split(tt.args, " "))
-			test.Error(t, err)
-			test.T(t, *s, tt.s)
-			test.T(t, strings.Join(rest, " "), tt.rest)
+			test.T(t, s, tt.s)
+			test.T(t, strings.Join(rest, " "), "")
 		})
 	}
 }
@@ -70,6 +87,10 @@ type SOptions struct {
 	B    bool   `short:"b"`
 	C    int    `short:"c"`
 	Name string `long:"N-a_më"`
+}
+
+func (_ *SOptions) Run() error {
+	return nil
 }
 
 func TestArgp(t *testing.T) {
@@ -97,64 +118,100 @@ func TestArgp(t *testing.T) {
 
 	for _, tt := range argpTests {
 		t.Run(tt.args, func(t *testing.T) {
-			argp := NewArgp("description")
+			s := SOptions{}
+			argp := NewCmd(&s, "description")
 
-			s := &SOptions{}
-			err := argp.AddStruct(s)
+			_, rest, err := argp.parse(strings.Split(tt.args, " "))
 			test.Error(t, err)
-
-			rest, err := argp.parse(strings.Split(tt.args, " "))
-			test.Error(t, err)
-			test.T(t, *s, tt.s)
+			test.T(t, s, tt.s)
 			test.T(t, strings.Join(rest, " "), tt.rest)
 		})
 	}
 }
 
 func TestArgpAdd(t *testing.T) {
-	argp := NewArgp("description")
+	var o int64
+	var v bool
+	argp := New("description")
+	argp.AddOpt(&o, "", "long", 4, "description")
+	argp.AddVal(&v, false, "description")
 
-	var v int64
-	err := argp.Add(&v, "", "verb", 4, "")
+	_, _, err := argp.parse([]string{"--long", "8", "true"})
 	test.Error(t, err)
+	test.T(t, o, int64(8))
+	test.T(t, v, true)
 
-	_, err = argp.parse([]string{"--verb", "8"})
+	_, _, err = argp.parse([]string{})
 	test.Error(t, err)
-	test.T(t, v, int64(8))
-
-	_, err = argp.parse([]string{})
-	test.Error(t, err)
-	test.T(t, v, int64(4))
+	test.T(t, o, int64(4))
+	test.T(t, v, false)
 }
 
-func TestArgpSub(t *testing.T) {
-	argp := NewArgp("description")
-	sub1 := NewArgp("first")
-	sub2 := NewArgp("second")
-	argp.AddCommand("first", sub1)
-	argp.AddCommand("second", sub2)
+func TestArgpUTF8(t *testing.T) {
+	var v bool
+	argp := New("description")
+	argp.AddOpt(&v, "á", "", false, "description")
 
+	_, _, err := argp.parse([]string{"-á"})
+	test.Error(t, err)
+	test.T(t, v, true)
+}
+
+func TestArgpCount(t *testing.T) {
+	var i Count
+	argp := New("description")
+	argp.AddOpt(&i, "i", "int", 0, "description")
+
+	_, _, err := argp.parse([]string{"-i", "-ii", "--int", "--int"})
+	test.Error(t, err)
+	test.T(t, i, Count(5))
+
+	_, _, err = argp.parse([]string{"-i", "3"})
+	test.Error(t, err)
+	test.T(t, i, Count(3))
+
+	_, _, err = argp.parse([]string{"--int", "3"})
+	test.Error(t, err)
+	test.T(t, i, Count(3))
+}
+
+type SSub1 struct {
+	B int `short:"b"`
+}
+
+func (_ *SSub1) Run() error {
+	return nil
+}
+
+type SSub2 struct {
+	C int `short:"c"`
+}
+
+func (_ *SSub2) Run() error {
+	return nil
+}
+
+func TestArgpSubCommand(t *testing.T) {
+	var v string
 	var a int
-	err := argp.Add(&a, "a", "", nil, "")
-	test.Error(t, err)
+	sub1 := SSub1{}
+	sub2 := SSub2{}
+	argp := New("description")
+	argp.AddVal(&v, "", "description")
+	argp.AddOpt(&a, "a", "", 0, "description")
+	argp.AddCmd(&sub1, "one", "description")
+	argp.AddCmd(&sub2, "two", "description")
 
-	var b int
-	err = sub1.Add(&b, "b", "", nil, "")
+	_, _, err := argp.parse([]string{"val", "-a", "1"})
 	test.Error(t, err)
-
-	var c int
-	err = sub2.Add(&c, "c", "", nil, "")
-	test.Error(t, err)
-
-	_, err = argp.parse([]string{"-a", "1"})
-	test.Error(t, err)
+	test.T(t, v, "val")
 	test.T(t, a, 1)
 
-	_, err = argp.parse([]string{"first", "-b", "2"})
+	_, _, err = argp.parse([]string{"one", "-b", "2"})
 	test.Error(t, err)
-	test.T(t, b, 2)
+	test.T(t, sub1.B, 2)
 
-	_, err = argp.parse([]string{"second", "-c", "3"})
+	_, _, err = argp.parse([]string{"two", "-c", "3"})
 	test.Error(t, err)
-	test.T(t, c, 3)
+	test.T(t, sub2.C, 3)
 }

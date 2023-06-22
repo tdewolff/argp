@@ -249,6 +249,36 @@ func (argp *Argp) AddOpt(i interface{}, short, long string, def interface{}, des
 	argp.vars = append(argp.vars, variable)
 }
 
+// AddVal adds an indexed value
+func (argp *Argp) AddVal(i interface{}, def interface{}, description string) {
+	v := reflect.ValueOf(i)
+	if v.Type().Kind() != reflect.Ptr {
+		panic("must pass pointer")
+	}
+	v = v.Elem()
+
+	variable := &Var{}
+	variable.Value = v
+	variable.Index = 0
+
+	if !isValidType(v.Type()) {
+		panic(fmt.Sprintf("unsupported type %s", v.Type()))
+	}
+
+	// find next free index
+	for _, v := range argp.vars {
+		if variable.Index <= v.Index {
+			variable.Index = v.Index + 1
+		}
+	}
+
+	if def != nil {
+		variable.Default = def
+	}
+	variable.Description = description
+	argp.vars = append(argp.vars, variable)
+}
+
 // AddCmd adds a sub command
 func (argp *Argp) AddCmd(cmd Cmd, name, description string) *Argp {
 	if _, ok := argp.cmds[name]; ok {
@@ -519,12 +549,15 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 					}
 				} else {
 					v := argp.findLong(name)
+					j := 2 + len(name)
 					if v == nil {
 						return argp, nil, fmt.Errorf("unknown option --%s", name)
 					} else if v.Value.Kind() == reflect.Bool {
 						if _, err := v.SetString("true"); err != nil {
 							return argp, nil, fmt.Errorf("option --%s: %v", name, err)
 						}
+					} else if v.Value.Type() == reflect.TypeOf(Count(0)) && (j < len(arg) && arg[j] != '=' && (arg[j] < '0' || '9' < arg[j]) || j == len(arg) && (i+1 == len(args) || len(args[i+1]) == 0 || args[i+1][0] < '0' || '9' < args[i+1][0])) {
+						v.Value.SetInt(v.Value.Int() + 1)
 					} else if len(args) <= i+1 {
 						return argp, nil, fmt.Errorf("option --%s: value is missing", name)
 					} else {
