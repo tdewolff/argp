@@ -16,9 +16,6 @@ import (
 // ShowUsage can be returned from a command to show the help message.
 var ShowUsage error = fmt.Errorf("bad command usage")
 
-// Count is a counting option, e.g. -vvv sets count to 3
-type Count int
-
 // Var is a command option or argument
 type Var struct {
 	Value       reflect.Value
@@ -29,6 +26,7 @@ type Var struct {
 	Rest        bool
 	Default     interface{} // nil is not used
 	Description string
+	IsSet       bool
 }
 
 // IsOption returns true for an option
@@ -41,19 +39,19 @@ func (v *Var) IsArgument() bool {
 	return v.Index != -1 || v.Rest
 }
 
-// SetString sets the variable's value from a string
-func (v *Var) SetString(s ...string) (int, error) {
-	i, n, err := parseVar(v.Value.Type(), s)
-	if err != nil {
-		return n, err
-	}
-	v.Set(i)
-	return n, nil
-}
-
 // Set sets the variable's value
 func (v *Var) Set(i interface{}) {
 	v.Value.Set(reflect.ValueOf(i).Convert(v.Value.Type()))
+	v.IsSet = true
+}
+
+// SetString sets the variable's value from a string
+func (v *Var) SetString(s ...string) (int, error) {
+	n, err := scanVar(v.Value, s)
+	if err == nil {
+		v.IsSet = true
+	}
+	return n, err
 }
 
 // Cmd is a command
@@ -91,11 +89,11 @@ func NewCmd(cmd Cmd, description string) *Argp {
 	if cmd != nil {
 		v := reflect.ValueOf(cmd)
 		if v.Type().Kind() != reflect.Ptr {
-			panic("must pass pointer to struct")
+			panic("cmd: must pass a pointer to struct")
 		}
 		v = v.Elem()
 		if v.Type().Kind() != reflect.Struct {
-			panic("must pass pointer to struct")
+			panic("cmd: must pass a pointer to struct")
 		}
 
 		maxIndex := -1
@@ -171,11 +169,7 @@ func NewCmd(cmd Cmd, description string) *Argp {
 					}
 				}
 				if def != "" {
-					iDef, _, err := parseVar(variable.Value.Type(), []string{def})
-					if err != nil {
-						panic(fmt.Sprintf("bad option default: %v", err))
-					}
-					variable.Default = iDef
+					variable.Default = def
 				}
 				if description != "" {
 					variable.Description = description
@@ -207,12 +201,13 @@ func NewCmd(cmd Cmd, description string) *Argp {
 }
 
 // AddOpt adds an option
-func (argp *Argp) AddOpt(i interface{}, short, long string, def interface{}, description string) {
-	v := reflect.ValueOf(i)
-	if v.Type().Kind() != reflect.Ptr {
-		panic("must pass pointer")
+func (argp *Argp) AddOpt(dst interface{}, short, long string, def interface{}, description string) {
+	v := reflect.ValueOf(dst)
+	if _, ok := dst.(Scanner); !ok && v.Type().Kind() != reflect.Ptr {
+		panic("dst: must pass pointer to variable or comply with argp.Scanner interface")
+	} else if !ok {
+		v = v.Elem()
 	}
-	v = v.Elem()
 
 	variable := &Var{}
 	variable.Value = v
@@ -250,12 +245,13 @@ func (argp *Argp) AddOpt(i interface{}, short, long string, def interface{}, des
 }
 
 // AddVal adds an indexed value
-func (argp *Argp) AddVal(i interface{}, def interface{}, description string) {
-	v := reflect.ValueOf(i)
-	if v.Type().Kind() != reflect.Ptr {
-		panic("must pass pointer")
+func (argp *Argp) AddVal(dst interface{}, def interface{}, description string) {
+	v := reflect.ValueOf(dst)
+	if _, ok := dst.(Scanner); !ok && v.Type().Kind() != reflect.Ptr {
+		panic("dst: must pass pointer to variable or comply with argp.Scanner interface")
+	} else if !ok {
+		v = v.Elem()
 	}
-	v = v.Elem()
 
 	variable := &Var{}
 	variable.Value = v
@@ -438,10 +434,10 @@ func (argp *Argp) Parse() []string {
 		fmt.Printf("%v\n\n", err)
 		sub.PrintHelp()
 		os.Exit(1)
-	} else if sub.help {
+	} else if sub.help || sub.Cmd == nil {
 		sub.PrintHelp()
 		os.Exit(0)
-	} else if sub.Cmd != nil {
+	} else {
 		if len(rest) != 0 {
 			msg := "unknown arguments"
 			if len(rest) == 1 {
@@ -513,19 +509,19 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		}
 	}
 
-	// set default
-	requiredIndices := 0
+	// mark all variables as not set explicitly
+	// this may be needed when running parse twice
 	for _, v := range argp.vars {
-		if v.Default != nil {
-			v.Set(v.Default)
-			if v.Index != -1 && requiredIndices < v.Index {
-				requiredIndices = v.Index
-			}
-		}
+		v.IsSet = false
 	}
 
 	rest := []string{}
+	kk := 0
 	for i := 0; i < len(args); i++ {
+		if 5 < kk {
+			break
+		}
+		kk++
 		arg := args[i]
 		if arg == "--" {
 			rest = append(rest, args[i+1:]...)
@@ -549,17 +545,10 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 					}
 				} else {
 					v := argp.findLong(name)
-					j := 2 + len(name)
 					if v == nil {
 						return argp, nil, fmt.Errorf("unknown option --%s", name)
 					} else if v.Value.Kind() == reflect.Bool {
-						if _, err := v.SetString("true"); err != nil {
-							return argp, nil, fmt.Errorf("option --%s: %v", name, err)
-						}
-					} else if v.Value.Type() == reflect.TypeOf(Count(0)) && (j < len(arg) && arg[j] != '=' && (arg[j] < '0' || '9' < arg[j]) || j == len(arg) && (i+1 == len(args) || len(args[i+1]) == 0 || args[i+1][0] < '0' || '9' < args[i+1][0])) {
-						v.Value.SetInt(v.Value.Int() + 1)
-					} else if len(args) <= i+1 {
-						return argp, nil, fmt.Errorf("option --%s: value is missing", name)
+						v.Set(true)
 					} else {
 						n, err := v.SetString(args[i+1:]...)
 						i += n
@@ -577,26 +566,30 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 					if v == nil {
 						return argp, nil, fmt.Errorf("unknown option -%c", name)
 					} else if v.Value.Kind() == reflect.Bool {
-						if _, err := v.SetString("true"); err != nil {
-							return argp, nil, fmt.Errorf("option -%c: %v", name, err)
-						}
-					} else if v.Value.Type() == reflect.TypeOf(Count(0)) && (j < len(arg) && arg[j] != '=' && (arg[j] < '0' || '9' < arg[j]) || j == len(arg) && (i+1 == len(args) || len(args[i+1]) == 0 || args[i+1][0] < '0' || '9' < args[i+1][0])) {
-						v.Value.SetInt(v.Value.Int() + 1)
+						v.Set(true)
 					} else {
 						if j < len(arg) {
-							if arg[j] == '=' {
+							hasEquals := arg[j] == '='
+							if hasEquals {
 								j++
 							}
 							value := arg[j:]
 							n, err := v.SetString(append([]string{value}, args[i+1:]...)...)
+							if n == 0 {
+								if hasEquals {
+									return argp, nil, fmt.Errorf("option -%c: must not have value", name)
+								}
+								continue // can be of form: -abc
+							}
 							i += n - 1
 							if err != nil {
 								return argp, nil, fmt.Errorf("option -%c: %v", name, err)
 							}
-						} else if len(args) <= i+1 {
-							return argp, nil, fmt.Errorf("option -%c: value is missing", name)
 						} else {
 							n, err := v.SetString(args[i+1:]...)
+							if n == 0 {
+								continue // can be of form: -abc
+							}
 							i += n
 							if err != nil {
 								return argp, nil, fmt.Errorf("option -%c: %v", name, err)
@@ -623,158 +616,119 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		}
 		index++
 	}
-	if index < requiredIndices {
-		v := argp.findIndex(index)
-		return argp, nil, fmt.Errorf("argument %v is missing", v.Name)
-	}
-	rest = rest[index:]
 
 	// rest arguments
 	v := argp.findRest()
+	rest = rest[index:]
 	if v != nil {
 		v.Set(rest)
 		rest = rest[:0]
 	}
+
+	// set defaults
+	for _, v := range argp.vars {
+		if !v.IsSet {
+			if v.Index != -1 && v.Default == nil {
+				return argp, nil, fmt.Errorf("argument %v is missing", v.Name)
+			} else if v.Default != nil {
+				if s, ok := v.Default.(string); ok {
+					v.SetString(s)
+				} else {
+					v.Set(v.Default)
+				}
+			}
+		}
+	}
 	return argp, rest, nil
 }
 
-func parseVar(t reflect.Type, s []string) (interface{}, int, error) {
-	switch t.Kind() {
+func scanVar(v reflect.Value, s []string) (int, error) {
+	if scanner, ok := v.Interface().(Scanner); ok {
+		// implements Scanner
+		n, err := scanner.Scan(s)
+		return n, err
+	} else if len(s) == 0 {
+		return 0, fmt.Errorf("value is missing")
+	}
+
+	n := 0
+	switch v.Kind() {
 	case reflect.String:
-		return s[0], 1, nil
+		v.SetString(s[0])
+		n++
 	case reflect.Bool:
 		i, err := strconv.ParseBool(s[0])
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid boolean: %v", s[0])
+			return 0, fmt.Errorf("invalid boolean: %v", s[0])
 		}
-		return i, 1, nil
-	case reflect.Int:
-		i, err := strconv.ParseInt(s[0], 10, 0)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Int8:
-		i, err := strconv.ParseInt(s[0], 10, 8)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Int16:
-		i, err := strconv.ParseInt(s[0], 10, 16)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Int32:
-		i, err := strconv.ParseInt(s[0], 10, 32)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Int64:
+		v.SetBool(i)
+		n++
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		i, err := strconv.ParseInt(s[0], 10, 64)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid integer: %v", s[0])
+			return 0, fmt.Errorf("invalid integer: %v", s[0])
 		}
-		return i, 1, nil
-	case reflect.Uint:
-		i, err := strconv.ParseUint(s[0], 10, 0)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid positive integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Uint8:
-		i, err := strconv.ParseUint(s[0], 10, 8)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid positive integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Uint16:
-		i, err := strconv.ParseUint(s[0], 10, 16)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid positive integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Uint32:
-		i, err := strconv.ParseUint(s[0], 10, 32)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid positive integer: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Uint64:
+		v.SetInt(i)
+		n++
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		i, err := strconv.ParseUint(s[0], 10, 64)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid positive integer: %v", s[0])
+			return 0, fmt.Errorf("invalid positive integer: %v", s[0])
 		}
-		return i, 1, nil
-	case reflect.Float32:
-		i, err := strconv.ParseFloat(s[0], 32)
-		if err != nil {
-			return nil, 0, fmt.Errorf("invalid number: %v", s[0])
-		}
-		return i, 1, nil
-	case reflect.Float64:
+		v.SetUint(i)
+		n++
+	case reflect.Float32, reflect.Float64:
 		i, err := strconv.ParseFloat(s[0], 64)
 		if err != nil {
-			return nil, 0, fmt.Errorf("invalid number: %v", s[0])
+			return 0, fmt.Errorf("invalid number: %v", s[0])
 		}
-		return i, 1, nil
+		v.SetFloat(i)
+		n++
 	case reflect.Array:
-		k := 0
-		v := reflect.New(t).Elem()
-		for j := 0; j < t.Len(); j++ {
-			if len(s) <= k {
-				return nil, 0, fmt.Errorf("missing values")
+		for j := 0; j < v.Len(); j++ {
+			if len(s) <= n {
+				return 0, fmt.Errorf("missing values")
 			}
-			i, n, err := parseVar(t.Elem(), s[k:])
+			m, err := scanVar(v.Index(j), s[n:])
 			if err != nil {
-				return nil, 0, err
+				return 0, err
 			}
-			v.Index(j).Set(reflect.ValueOf(i).Convert(t.Elem()))
-			k += n
+			n += m
 		}
-		return v.Interface(), k, nil
 	case reflect.Slice:
-		k := 0
-		slice := []interface{}{}
-		for k < len(s) {
-			i, n, err := parseVar(t.Elem(), s[k:])
+		j := 0
+		slice := reflect.Zero(v.Type())
+		for n < len(s) {
+			slice = reflect.Append(slice, reflect.New(v.Type().Elem()).Elem())
+			m, err := scanVar(slice.Index(j), s[n:])
 			if err != nil {
-				if k == 0 {
-					return nil, 0, err
+				if n == 0 {
+					return 0, err
 				}
 				break
 			}
-			slice = append(slice, i)
-			k += n
+			n += m
+			j++
 		}
-		if len(slice) == 0 {
-			return nil, 0, fmt.Errorf("missing values")
+		if n == 0 {
+			return 0, fmt.Errorf("missing values")
 		}
-		v := reflect.MakeSlice(t, len(slice), len(slice))
-		for j, i := range slice {
-			v.Index(j).Set(reflect.ValueOf(i).Convert(t.Elem()))
-		}
-		return v.Interface(), k, nil
+		v.Set(slice)
 	case reflect.Struct:
-		k := 0
-		v := reflect.New(t).Elem()
-		for j := 0; j < t.NumField(); j++ {
-			if len(s) <= k {
-				return nil, 0, fmt.Errorf("missing values")
+		for j := 0; j < v.NumField(); j++ {
+			if len(s) <= n {
+				return 0, fmt.Errorf("missing values")
 			}
-			i, n, err := parseVar(t.Field(j).Type, s[k:])
+			m, err := scanVar(v.Field(j), s[n:])
 			if err != nil {
-				return nil, 0, err
+				return 0, err
 			}
-			v.Field(j).Set(reflect.ValueOf(i).Convert(t.Field(j).Type))
-			k += n
+			n += m
 		}
-		return v.Interface(), k, nil
-
+	default:
+		panic(fmt.Sprintf("unsupported type %s", v.Type())) // should never happen
 	}
-	panic(fmt.Sprintf("unsupported type %s", t)) // should never happen
+	return n, nil
 }
 
 func isValidName(s string) bool {
@@ -787,7 +741,8 @@ func isValidName(s string) bool {
 }
 
 func isValidType(t reflect.Type) bool {
-	if t == reflect.TypeOf(Count(0)) {
+	if t.Implements(reflect.TypeOf((*Scanner)(nil)).Elem()) {
+		// implements Scanner
 		return true
 	}
 	return isValidSubType(t)

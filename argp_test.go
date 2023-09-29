@@ -40,38 +40,40 @@ func (_ *STypes) Run() error {
 
 func TestArgpTypes(t *testing.T) {
 	argpTests := []struct {
-		args string
+		args []string
 		s    STypes
 	}{
-		{"--string val", STypes{String: "val"}},
-		{"--bool", STypes{Bool: true}},
-		{"--int 36", STypes{Int: 36}},
-		{"--int8 36", STypes{Int8: 36}},
-		{"--int16 36", STypes{Int16: 36}},
-		{"--int32 36", STypes{Int32: 36}},
-		{"--int64 36", STypes{Int64: 36}},
-		{"--uint 36", STypes{Uint: 36}},
-		{"--uint8 36", STypes{Uint8: 36}},
-		{"--uint16 36", STypes{Uint16: 36}},
-		{"--uint32 36", STypes{Uint32: 36}},
-		{"--uint64 36", STypes{Uint64: 36}},
-		{"--float32 36", STypes{Float32: 36}},
-		{"--float64 36", STypes{Float64: 36}},
-		{"--array 1 2 3", STypes{Array: [3]int{1, 2, 3}}},
-		{"--slice foo bar", STypes{Slice: []string{"foo", "bar"}}},
+		{[]string{"--string", "val"}, STypes{String: "val"}},
+		{[]string{"--bool"}, STypes{Bool: true}},
+		{[]string{"--int", "36"}, STypes{Int: 36}},
+		{[]string{"--int8", "36"}, STypes{Int8: 36}},
+		{[]string{"--int16", "36"}, STypes{Int16: 36}},
+		{[]string{"--int32", "36"}, STypes{Int32: 36}},
+		{[]string{"--int64", "36"}, STypes{Int64: 36}},
+		{[]string{"--uint", "36"}, STypes{Uint: 36}},
+		{[]string{"--uint8", "36"}, STypes{Uint8: 36}},
+		{[]string{"--uint16", "36"}, STypes{Uint16: 36}},
+		{[]string{"--uint32", "36"}, STypes{Uint32: 36}},
+		{[]string{"--uint64", "36"}, STypes{Uint64: 36}},
+		{[]string{"--float32", "36"}, STypes{Float32: 36}},
+		{[]string{"--float64", "36"}, STypes{Float64: 36}},
+		{[]string{"--array", "1", "2", "3"}, STypes{Array: [3]int{1, 2, 3}}},
+		{[]string{"--slice", "foo", "bar"}, STypes{Slice: []string{"foo", "bar"}}},
+		//{[]string{"--slice", "[foo", "bar]"}, STypes{Slice: []string{"foo", "bar"}}},
+		//{[]string{"--slice", "[foo bar]"}, STypes{Slice: []string{"foo", "bar"}}},
 		// TODO: think of how to parse arrays/slices/structs, with comma, brackets, or both?
 		//{"--slice foo,bar", STypes{Slice: []string{"foo", "bar"}}},
 		//{"--slice [foo bar]", STypes{Slice: []string{"foo", "bar"}}},
-		{"--struct true 5.0", STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
+		{[]string{"--struct", "true", "5.0"}, STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
 		//{"--struct [true 5.0]", STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
 		//{"--struct.bool true --struct.struct.float64 5.0", STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
 	}
 
 	for _, tt := range argpTests {
-		t.Run(tt.args, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%v", tt.args), func(t *testing.T) {
 			s := STypes{}
 			argp := NewCmd(&s, "description")
-			_, rest, err := argp.parse(strings.Split(tt.args, " "))
+			_, rest, err := argp.parse(tt.args)
 			test.Error(t, err)
 			test.T(t, s, tt.s)
 			test.T(t, strings.Join(rest, " "), "")
@@ -95,33 +97,33 @@ func (_ *SOptions) Run() error {
 
 func TestArgp(t *testing.T) {
 	argpTests := []struct {
-		args string
+		args []string
 		s    SOptions
 		rest string
 	}{
-		{"--foo val", SOptions{Foo: "val", Baz: "default"}, ""},
-		{"-f val", SOptions{Foo: "val", Baz: "default"}, ""},
-		{"--barbar val", SOptions{Bar: "val", Baz: "default"}, ""},
-		{"--baz val", SOptions{Baz: "val"}, ""},
-		{"input1 input2", SOptions{Baz: "default"}, "input1 input2"},
-		{"input1 --baz val input2", SOptions{Baz: "val"}, "input1 input2"},
-		{"-a -b -c 5", SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
-		{"-a -b -c=5", SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
-		{"-a -b -c5", SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
-		{"-abc5", SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
-		{"-- -abc5", SOptions{Baz: "default"}, "-abc5"},
-		{"--n-A_më val", SOptions{Baz: "default", Name: "val"}, ""},
-		{"--Baz=-", SOptions{Baz: "-"}, ""},
-		{"--Baz -", SOptions{Baz: "-"}, ""},
-		{"-", SOptions{Baz: "default"}, "-"},
+		{[]string{"--foo", "val"}, SOptions{Foo: "val", Baz: "default"}, ""},
+		{[]string{"-f", "val"}, SOptions{Foo: "val", Baz: "default"}, ""},
+		{[]string{"--barbar", "val"}, SOptions{Bar: "val", Baz: "default"}, ""},
+		{[]string{"--baz", "val"}, SOptions{Baz: "val"}, ""},
+		{[]string{"input1", "input2"}, SOptions{Baz: "default"}, "input1 input2"},
+		{[]string{"input1", "--baz", "val", "input2"}, SOptions{Baz: "val"}, "input1 input2"},
+		{[]string{"-a", "-b", "-c", "5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
+		{[]string{"-a", "-b", "-c=5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
+		{[]string{"-a", "-b", "-c5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
+		{[]string{"-abc5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
+		{[]string{"--", "-abc5"}, SOptions{Baz: "default"}, "-abc5"},
+		{[]string{"--n-A_më", "val"}, SOptions{Baz: "default", Name: "val"}, ""},
+		{[]string{"--Baz=-"}, SOptions{Baz: "-"}, ""},
+		{[]string{"--Baz", "-"}, SOptions{Baz: "-"}, ""},
+		{[]string{"-"}, SOptions{Baz: "default"}, "-"},
 	}
 
 	for _, tt := range argpTests {
-		t.Run(tt.args, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%v", tt.args), func(t *testing.T) {
 			s := SOptions{}
 			argp := NewCmd(&s, "description")
 
-			_, rest, err := argp.parse(strings.Split(tt.args, " "))
+			_, rest, err := argp.parse(tt.args)
 			test.Error(t, err)
 			test.T(t, s, tt.s)
 			test.T(t, strings.Join(rest, " "), tt.rest)
