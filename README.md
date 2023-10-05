@@ -157,11 +157,19 @@ argp.AddOpt(&v, "v", "var", v{"string", 42, [2]bool{0, 1}}", "description")
 
 Count type
 ```go
-var v argp.Count
-argp.AddOpt(&v, "v","var", 0, "description")
+var v int
+argp.AddOpt(Count{&v}, "v","var", 0, "description")
 // Count the number of times flag is present
 // -v -v / -vv / --var --var  =>  2
 // or: -v 5  =>  5
+```
+
+Append type
+```go
+var v []int
+argp.AddOpt(Append{&v}, "v","var", 0, "description")
+// Append values for each flag
+// -v 1 -v 2  =>  [1 2]
 ```
 
 ### Option tags

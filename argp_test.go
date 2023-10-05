@@ -230,19 +230,19 @@ func TestArgpErrors(t *testing.T) {
 	var cmd *Argp
 
 	cmd = New("description")
-	cmd.AddVal(&[]int{}, "", "")
+	cmd.AddVal(&[]int{}, nil, "")
 	_, _, err = cmd.parse([]string{"5,s"})
 	test.T(t, err, fmt.Errorf("argument 0: index 1: invalid integer 's'"))
 
 	cmd = New("description")
-	cmd.AddVal(&map[int]int{}, "", "")
+	cmd.AddVal(&map[int]int{}, nil, "")
 	_, _, err = cmd.parse([]string{"{s:5}"})
 	test.T(t, err, fmt.Errorf("argument 0: key: invalid integer 's'"))
 	_, _, err = cmd.parse([]string{"{5:s}"})
 	test.T(t, err, fmt.Errorf("argument 0: key '5': invalid integer 's'"))
 
 	cmd = New("description")
-	cmd.AddOpt(&map[int]int{}, "", "val", "", "")
+	cmd.AddOpt(&map[int]int{}, "", "val", nil, "")
 	_, _, err = cmd.parse([]string{"--val.s=6"})
 	test.T(t, err, fmt.Errorf("option --val.s: index 's': invalid integer"))
 }
@@ -326,21 +326,37 @@ func TestArgpUTF8(t *testing.T) {
 }
 
 func TestArgpCount(t *testing.T) {
-	var i Count
+	var i int
 	argp := New("description")
-	argp.AddOpt(&i, "i", "int", 0, "description")
+	argp.AddOpt(Count{&i}, "i", "int", 0, "description")
 
 	_, _, err := argp.parse([]string{"-i", "-ii", "--int", "--int"})
 	test.Error(t, err)
-	test.T(t, i, Count(5))
+	test.T(t, i, 5)
 
 	_, _, err = argp.parse([]string{"-i", "3"})
 	test.Error(t, err)
-	test.T(t, i, Count(3))
+	test.T(t, i, 3)
 
 	_, _, err = argp.parse([]string{"--int", "3"})
 	test.Error(t, err)
-	test.T(t, i, Count(3))
+	test.T(t, i, 3)
+}
+
+func TestArgpAppend(t *testing.T) {
+	var i []int
+	var s []string
+	argp := New("description")
+	argp.AddOpt(Append{&i}, "i", "int", nil, "description")
+	argp.AddOpt(Append{&s}, "s", "string", nil, "description")
+
+	_, _, err := argp.parse([]string{"-i", "1", "--int", "2"})
+	test.Error(t, err)
+	test.T(t, i, []int{1, 2})
+
+	_, _, err = argp.parse([]string{"-s", "foo", "--string", "bar"})
+	test.Error(t, err)
+	test.T(t, s, []string{"foo", "bar"})
 }
 
 type SSub1 struct {
@@ -384,6 +400,19 @@ func TestArgpSubCommand(t *testing.T) {
 	test.T(t, sub2.C, 3)
 }
 
+func ExampleCount() {
+	var count int
+	argp := New("count variable")
+	argp.AddOpt(Count{&count}, "c", "count", "", "")
+
+	_, _, err := argp.parse([]string{"-ccc"})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(count)
+	// Output: 3
+}
+
 type ExampleCustom struct {
 	Num, Div float64
 }
@@ -425,13 +454,15 @@ func (e *ExampleCustom) Scan(s []string) (int, error) {
 	return n + 1, nil
 }
 
-func TestCustomVar(t *testing.T) {
+func ExampleCustomVar() {
 	custom := ExampleCustom{}
 	argp := New("custom variable")
 	argp.AddOpt(&custom, "", "custom", "", "")
 
 	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
-	test.Error(t, err)
-	test.T(t, custom.Num, 1.0)
-	test.T(t, custom.Div, 2.0)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(custom.Num, "/", custom.Div)
+	// Output: 1 / 2
 }

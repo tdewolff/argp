@@ -26,7 +26,6 @@ type Var struct {
 	Rest        bool
 	Default     interface{} // nil is not used
 	Description string
-	IsSet       bool
 }
 
 // IsOption returns true for an option
@@ -40,18 +39,13 @@ func (v *Var) IsArgument() bool {
 }
 
 // Set sets the variable's value
-func (v *Var) Set(i interface{}) {
-	v.Value.Set(reflect.ValueOf(i).Convert(v.Value.Type()))
-	v.IsSet = true
-}
-
-// SetString sets the variable's value from a string
-func (v *Var) SetString(s ...string) (int, error) {
-	n, err := ScanVar(v.Value, s)
-	if err == nil {
-		v.IsSet = true
+func (v *Var) Set(i interface{}) bool {
+	val := reflect.ValueOf(i)
+	if !val.CanConvert(v.Value.Type()) {
+		return false
 	}
-	return n, err
+	v.Value.Set(val.Convert(v.Value.Type()))
+	return true
 }
 
 // Cmd is a command
@@ -509,10 +503,23 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		}
 	}
 
-	// mark all variables as not set explicitly
-	// this may be needed when running parse twice
+	// set defaults
 	for _, v := range argp.vars {
-		v.IsSet = false
+		if v.Default != nil {
+			if s, ok := v.Default.(string); ok && v.Value.Kind() != reflect.String {
+				if s != "" {
+					if _, err := ScanVar(v.Value, []string{s}); err != nil {
+						return argp, nil, fmt.Errorf("default: %v", err)
+					}
+				}
+			} else if setter, ok := v.Value.Interface().(Setter); ok {
+				if err := setter.Set(v.Default); err != nil {
+					return argp, nil, fmt.Errorf("default: %v", err)
+				}
+			} else if ok := v.Set(v.Default); !ok {
+				return argp, nil, fmt.Errorf("default: expected type %v", v.Value.Type())
+			}
+		}
 	}
 
 	rest := []string{}
@@ -549,7 +556,6 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 				if err != nil {
 					return argp, nil, fmt.Errorf("option --%s: %v", name, err)
 				} else {
-					v.IsSet = true
 					i += n
 					if split {
 						i--
@@ -572,7 +578,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 								j++
 							}
 							value := arg[j:]
-							n, err := v.SetString(append([]string{value}, args[i+1:]...)...)
+							n, err := ScanVar(v.Value, append([]string{value}, args[i+1:]...))
 							if n == 0 {
 								if hasEquals {
 									return argp, nil, fmt.Errorf("option -%c: must not have value", name)
@@ -584,7 +590,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 								return argp, nil, fmt.Errorf("option -%c: %v", name, err)
 							}
 						} else {
-							n, err := v.SetString(args[i+1:]...)
+							n, err := ScanVar(v.Value, args[i+1:])
 							if n == 0 {
 								continue // can be of form: -abc
 							}
@@ -609,10 +615,15 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		if v == nil {
 			break
 		}
-		if _, err := v.SetString(arg); err != nil {
+		if _, err := ScanVar(v.Value, []string{arg}); err != nil {
 			return argp, nil, fmt.Errorf("argument %d: %v", index, err)
 		}
 		index++
+	}
+	for _, v := range argp.vars {
+		if v.Index != -1 && index <= v.Index && v.Default == nil {
+			return argp, nil, fmt.Errorf("argument %v is missing", v.Name)
+		}
 	}
 
 	// rest arguments
@@ -621,21 +632,6 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	if v != nil {
 		v.Set(rest)
 		rest = rest[:0]
-	}
-
-	// set defaults
-	for _, v := range argp.vars {
-		if !v.IsSet {
-			if v.Index != -1 && v.Default == nil {
-				return argp, nil, fmt.Errorf("argument %v is missing", v.Name)
-			} else if v.Default != nil {
-				if s, ok := v.Default.(string); ok {
-					v.SetString(s)
-				} else {
-					v.Set(v.Default)
-				}
-			}
-		}
 	}
 	return argp, rest, nil
 }
