@@ -19,10 +19,15 @@ type Count struct {
 }
 
 func (setter Count) Set(i interface{}) error {
-	v := reflect.ValueOf(i)
+	var v reflect.Value
 	dst := reflect.ValueOf(setter.i).Elem()
-	if !v.CanConvert(dst.Type()) {
-		return fmt.Errorf("expected type %v", dst.Type())
+	if i == nil {
+		v = reflect.Zero(dst.Type())
+	} else {
+		v = reflect.ValueOf(i)
+		if !v.CanConvert(dst.Type()) {
+			return fmt.Errorf("expected type %v", dst.Type())
+		}
 	}
 	dst.Set(v.Convert(dst.Type()))
 	return nil
@@ -56,10 +61,15 @@ type Append struct {
 }
 
 func (setter Append) Set(i interface{}) error {
-	v := reflect.ValueOf(i)
+	var v reflect.Value
 	dst := reflect.ValueOf(setter.i).Elem()
-	if !v.CanConvert(dst.Type()) {
-		return fmt.Errorf("expected type %v", dst.Type())
+	if i == nil {
+		v = reflect.Zero(dst.Type())
+	} else {
+		v = reflect.ValueOf(i)
+		if !v.CanConvert(dst.Type()) {
+			return fmt.Errorf("expected type %v", dst.Type())
+		}
 	}
 	dst.Set(v.Convert(dst.Type()))
 	return nil

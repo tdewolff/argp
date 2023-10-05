@@ -232,6 +232,9 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, def interface{}, d
 		variable.Short = r
 	}
 	if def != nil {
+		if _, ok := dst.(Setter); !ok && !reflect.ValueOf(def).CanConvert(v.Type()) {
+			panic(fmt.Errorf("default: expected type %v", v.Type()))
+		}
 		variable.Default = def
 	}
 	variable.Description = description
@@ -263,6 +266,9 @@ func (argp *Argp) AddVal(dst interface{}, def interface{}, description string) {
 	}
 
 	if def != nil {
+		if _, ok := dst.(Setter); !ok && !reflect.ValueOf(def).CanConvert(v.Type()) {
+			panic(fmt.Errorf("default: expected type %v", v.Type()))
+		}
 		variable.Default = def
 	}
 	variable.Description = description
@@ -506,13 +512,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	// set defaults
 	for _, v := range argp.vars {
 		if v.Default != nil {
-			if s, ok := v.Default.(string); ok && v.Value.Kind() != reflect.String {
-				if s != "" {
-					if _, err := ScanVar(v.Value, []string{s}); err != nil {
-						return argp, nil, fmt.Errorf("default: %v", err)
-					}
-				}
-			} else if setter, ok := v.Value.Interface().(Setter); ok {
+			if setter, ok := v.Value.Interface().(Setter); ok {
 				if err := setter.Set(v.Default); err != nil {
 					return argp, nil, fmt.Errorf("default: %v", err)
 				}

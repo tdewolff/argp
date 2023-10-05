@@ -403,7 +403,7 @@ func TestArgpSubCommand(t *testing.T) {
 func ExampleCount() {
 	var count int
 	argp := New("count variable")
-	argp.AddOpt(Count{&count}, "c", "count", "", "")
+	argp.AddOpt(Count{&count}, "c", "count", 0, "")
 
 	_, _, err := argp.parse([]string{"-ccc"})
 	if err != nil {
@@ -457,7 +457,7 @@ func (e *ExampleCustom) Scan(s []string) (int, error) {
 func ExampleCustomVar() {
 	custom := ExampleCustom{}
 	argp := New("custom variable")
-	argp.AddOpt(&custom, "", "custom", "", "")
+	argp.AddOpt(&custom, "", "custom", nil, "")
 
 	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
 	if err != nil {
