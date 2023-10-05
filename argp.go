@@ -47,7 +47,7 @@ func (v *Var) Set(i interface{}) {
 
 // SetString sets the variable's value from a string
 func (v *Var) SetString(s ...string) (int, error) {
-	n, err := scanVar(v.Value, s)
+	n, err := ScanVar(v.Value, s)
 	if err == nil {
 		v.IsSet = true
 	}
@@ -529,32 +529,30 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		}
 		if 1 < len(arg) && arg[0] == '-' {
 			if 1 < len(arg) && arg[1] == '-' {
+				split := false
+				s := args[i+1:]
 				name := arg[2:]
-				if idx := strings.IndexByte(name, '='); idx != -1 {
-					value := name[idx+1:]
-					name = name[:idx]
+				if idx := strings.IndexByte(arg, '='); idx != -1 {
+					name = arg[2:idx]
+					if idx+1 < len(arg) {
+						s = append([]string{arg[idx+1:]}, args[i+1:]...)
+						split = true
+					}
+				}
 
-					v := argp.findLong(name)
-					if v == nil {
-						return argp, nil, fmt.Errorf("unknown option --%s", name)
-					}
-					n, err := v.SetString(append([]string{value}, args[i+1:]...)...)
-					i += n - 1
-					if err != nil {
-						return argp, nil, fmt.Errorf("option --%s: %v", name, err)
-					}
+				indices := strings.Split(name, ".")
+				v := argp.findLong(indices[0])
+				if v == nil {
+					return argp, nil, fmt.Errorf("unknown option --%s", name)
+				}
+				n, err := scanIndexedVar(v.Value, indices[1:], s)
+				if err != nil {
+					return argp, nil, fmt.Errorf("option --%s: %v", name, err)
 				} else {
-					v := argp.findLong(name)
-					if v == nil {
-						return argp, nil, fmt.Errorf("unknown option --%s", name)
-					} else if v.Value.Kind() == reflect.Bool {
-						v.Set(true)
-					} else {
-						n, err := v.SetString(args[i+1:]...)
-						i += n
-						if err != nil {
-							return argp, nil, fmt.Errorf("option --%s: %v", name, err)
-						}
+					v.IsSet = true
+					i += n
+					if split {
+						i--
 					}
 				}
 			} else {
@@ -642,13 +640,116 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	return argp, rest, nil
 }
 
-func scanVar(v reflect.Value, s []string) (int, error) {
+var zeroValue = reflect.Value{}
+
+func truncEnd(s []string) ([]string, []string, bool) {
+	if len(s) == 0 {
+		return []string{}, s, false
+	}
+	levels := []byte{}
+	for n, item := range s {
+		for i := 0; i < len(item); i++ {
+			switch item[i] {
+			case '{', '[':
+				levels = append(levels, item[i]+2)
+			case '}', ']':
+				if len(levels) == 0 || levels[len(levels)-1] != item[i] {
+					return nil, s, false // opening/closing brackets don't match, or too many closing
+				} else if len(levels) == 1 {
+					if i+1 == len(item) {
+						return s[:n+1], s[n+1:], false
+					}
+					// split
+					k := s[n:]
+					s = append(s[:n:n], s[n][:i+1])
+					k[0] = k[0][i+1:]
+					return s, k, true
+				}
+				levels = levels[:len(levels)-1]
+			}
+		}
+	}
+	return nil, s, false // no closing bracket found
+}
+
+func scanIndexedVar(v reflect.Value, indices []string, s []string) (int, error) {
+	if _, ok := v.Interface().(Scanner); ok {
+		// implements Scanner
+		return ScanVar(v, s)
+	}
+
+	if 0 < len(indices) {
+		switch v.Kind() {
+		case reflect.Array, reflect.Slice:
+			index := 0
+			if t := v.Type().Elem().Kind(); t == reflect.Int || t == reflect.Int8 || t == reflect.Int16 || t == reflect.Int32 || t == reflect.Int64 {
+				i, err := strconv.ParseInt(indices[0], 10, 64)
+				if err != nil {
+					return 0, fmt.Errorf("index '%v': invalid integer", indices[0])
+				}
+				index = int(i)
+			} else if t == reflect.Uint || t == reflect.Uint8 || t == reflect.Uint16 || t == reflect.Uint32 || t == reflect.Uint64 {
+				i, err := strconv.ParseUint(indices[0], 10, 64)
+				if err != nil {
+					return 0, fmt.Errorf("index '%v': invalid positive integer", indices[0])
+				}
+				index = int(i)
+			} else {
+				return 0, fmt.Errorf("index '%v': unsupported type %v", indices[0], v.Type().Elem())
+			}
+			if v.IsNil() || index < 0 || v.Len() <= index {
+				return 0, fmt.Errorf("index '%v': out of range", indices[0])
+			}
+			return scanIndexedVar(v.Field(index), indices[1:], s)
+		case reflect.Map:
+			key := reflect.ValueOf(indices[0])
+			if t := v.Type().Key().Kind(); t == reflect.Int || t == reflect.Int8 || t == reflect.Int16 || t == reflect.Int32 || t == reflect.Int64 {
+				i, err := strconv.ParseInt(indices[0], 10, 64)
+				if err != nil {
+					return 0, fmt.Errorf("index '%v': invalid integer", indices[0])
+				}
+				key = reflect.ValueOf(i).Convert(v.Type().Key())
+			} else if t == reflect.Uint || t == reflect.Uint8 || t == reflect.Uint16 || t == reflect.Uint32 || t == reflect.Uint64 {
+				i, err := strconv.ParseUint(indices[0], 10, 64)
+				if err != nil {
+					return 0, fmt.Errorf("index '%v': invalid positive integer", indices[0])
+				}
+				key = reflect.ValueOf(i).Convert(v.Type().Key())
+			} else if t != reflect.String {
+				return 0, fmt.Errorf("index '%v': unsupported type %v", indices[0], v.Type().Key())
+			} else if v.IsNil() {
+				v.Set(reflect.MakeMap(v.Type()))
+			}
+			field := reflect.New(v.Type().Elem()).Elem()
+			n, err := scanIndexedVar(field, indices[1:], s)
+			if err == nil {
+				v.SetMapIndex(key, field)
+			}
+			return n, err
+		case reflect.Struct:
+			indices[0] = strings.Title(indices[0]) // TODO; deprecated
+			field := v.FieldByName(indices[0])
+			if field == zeroValue {
+				return 0, fmt.Errorf("index '%v': missing field in struct", indices[0])
+			}
+			return scanIndexedVar(field, indices[1:], s)
+		default:
+			panic(fmt.Sprintf("index '%v': unsupported type %v", indices[0], v.Type())) // should never happen
+		}
+	}
+	if len(s) == 0 && v.Kind() == reflect.Bool {
+		v.SetBool(true)
+		return 0, nil
+	}
+	return ScanVar(v, s)
+}
+
+func ScanVar(v reflect.Value, s []string) (int, error) {
 	if scanner, ok := v.Interface().(Scanner); ok {
 		// implements Scanner
-		n, err := scanner.Scan(s)
-		return n, err
+		return scanner.Scan(s)
 	} else if len(s) == 0 {
-		return 0, fmt.Errorf("value is missing")
+		return 0, fmt.Errorf("missing value")
 	}
 
 	n := 0
@@ -659,74 +760,248 @@ func scanVar(v reflect.Value, s []string) (int, error) {
 	case reflect.Bool:
 		i, err := strconv.ParseBool(s[0])
 		if err != nil {
-			return 0, fmt.Errorf("invalid boolean: %v", s[0])
+			if len(s[0]) == 0 || s[0][0] != '-' {
+				return 0, fmt.Errorf("invalid boolean '%v'", s[0])
+			}
+			v.SetBool(true)
+		} else {
+			v.SetBool(i)
+			n++
 		}
-		v.SetBool(i)
-		n++
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		i, err := strconv.ParseInt(s[0], 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("invalid integer: %v", s[0])
+			return 0, fmt.Errorf("invalid integer '%v'", s[0])
 		}
 		v.SetInt(i)
 		n++
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		i, err := strconv.ParseUint(s[0], 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("invalid positive integer: %v", s[0])
+			return 0, fmt.Errorf("invalid positive integer '%v'", s[0])
 		}
 		v.SetUint(i)
 		n++
 	case reflect.Float32, reflect.Float64:
 		i, err := strconv.ParseFloat(s[0], 64)
 		if err != nil {
-			return 0, fmt.Errorf("invalid number: %v", s[0])
+			return 0, fmt.Errorf("invalid number '%v'", s[0])
 		}
 		v.SetFloat(i)
 		n++
-	case reflect.Array:
-		for j := 0; j < v.Len(); j++ {
-			if len(s) <= n {
-				return 0, fmt.Errorf("missing values")
+	case reflect.Array, reflect.Slice:
+		var split, comma bool
+		if len(s[0]) == 0 {
+			return 0, fmt.Errorf("missing value")
+		} else if s[0][0] != '[' {
+			comma = true
+		} else if s, _, split = truncEnd(s); s == nil || split {
+			if v.Kind() == reflect.Slice {
+				return 0, fmt.Errorf("invalid slice")
 			}
-			m, err := scanVar(v.Index(j), s[n:])
-			if err != nil {
-				return 0, err
-			}
-			n += m
+			return 0, fmt.Errorf("invalid array")
 		}
-	case reflect.Slice:
-		j := 0
-		slice := reflect.Zero(v.Type())
-		for n < len(s) {
-			slice = reflect.Append(slice, reflect.New(v.Type().Elem()).Elem())
-			m, err := scanVar(slice.Index(j), s[n:])
-			if err != nil {
-				if n == 0 {
-					return 0, err
-				}
-				break
+		n = len(s)
+		if !comma {
+			if len(s[0]) == 1 {
+				s = s[1:]
+			} else {
+				s[0] = s[0][1:]
 			}
-			n += m
+			if len(s[len(s)-1]) == 1 {
+				s = s[:len(s)-1]
+			} else {
+				s[len(s)-1] = s[len(s)-1][:len(s[len(s)-1])-1]
+			}
+		}
+
+		j := 0
+		slice := reflect.Zero(reflect.SliceOf(v.Type().Elem()))
+		for {
+			if j != 0 && comma {
+				// consume comma
+				for 0 < len(s) && len(s[0]) == 0 {
+					s = s[1:]
+				}
+				if len(s) == 0 || s[0][0] != ',' {
+					break
+				} else if len(s[0]) == 1 {
+					s = s[1:]
+				} else {
+					s[0] = s[0][1:]
+				}
+			}
+
+			// consume value
+			var sVal []string
+			if len(s) == 0 {
+				if !comma || j == 0 {
+					break
+				}
+				// empty value after final comma
+				sVal = []string{""}
+			} else if 0 < len(s[0]) && (s[0][0] == '{' || s[0][0] == '[') {
+				if comma {
+					return 0, fmt.Errorf("index %v: invalid value", j)
+				}
+				sVal, s, split = truncEnd(s)
+				if split {
+					return 0, fmt.Errorf("index %v: invalid value", j)
+				}
+			} else if idx := strings.IndexByte(s[0], ','); idx != -1 && comma {
+				sVal = []string{s[0][:idx]}
+				s[0] = s[0][idx:]
+			} else {
+				sVal = []string{s[0]}
+				s = s[1:]
+			}
+			val := reflect.New(v.Type().Elem()).Elem()
+			if _, err := ScanVar(val, sVal); err != nil {
+				return 0, fmt.Errorf("index %v: %v", j, err)
+			}
+			slice = reflect.Append(slice, val)
 			j++
 		}
-		if n == 0 {
-			return 0, fmt.Errorf("missing values")
+		if v.Kind() == reflect.Array {
+			if j != v.Len() {
+				return 0, fmt.Errorf("expected %v values", v.Len())
+			}
+			v.Set(slice.Convert(v.Type()))
+		} else {
+			v.Set(slice)
 		}
-		v.Set(slice)
+	case reflect.Map:
+		var split bool
+		if len(s[0]) == 0 || s[0][0] != '{' {
+			return 0, fmt.Errorf("missing value")
+		} else if s, _, split = truncEnd(s); s == nil || split {
+			return 0, fmt.Errorf("invalid map")
+		}
+		n = len(s)
+		if len(s[0]) == 1 {
+			s = s[1:]
+		} else {
+			s[0] = s[0][1:]
+		}
+		if len(s[len(s)-1]) == 1 {
+			s = s[:len(s)-1]
+		} else {
+			s[len(s)-1] = s[len(s)-1][:len(s[len(s)-1])-1]
+		}
+
+		for 0 < len(s) {
+			// consume key
+			var sKey []string
+			if 0 < len(s[0]) && (s[0][0] == '{' || s[0][0] == '[') {
+				sKey, s, _ = truncEnd(s)
+				if len(s) == 0 || len(s[0]) == 0 || s[0][0] != ':' {
+					return 0, fmt.Errorf("key '%v': missing semicolon", strings.Join(sKey, " "))
+				}
+				if len(s[0]) == 1 {
+					s = s[1:]
+				} else {
+					s[0] = s[0][1:]
+				}
+			} else if idx := strings.IndexByte(s[0], ':'); idx == -1 {
+				sKey = []string{s[0]}
+				s = s[1:]
+				for 0 < len(s) && len(s[0]) == 0 {
+					s = s[1:]
+				}
+				if len(s) == 0 {
+					break
+				} else if s[0][0] != ':' {
+					return 0, fmt.Errorf("key '%v': missing semicolon", strings.Join(sKey, " "))
+				} else if len(s[0]) == 1 {
+					s = s[1:]
+				} else {
+					s[0] = s[0][1:]
+				}
+			} else {
+				sKey = []string{s[0][:idx]}
+				s[0] = s[0][idx+1:]
+			}
+			key := reflect.New(v.Type().Key()).Elem()
+			if _, err := ScanVar(key, sKey); err != nil {
+				return 0, fmt.Errorf("key: %v", err)
+			}
+
+			// consume value
+			index := strings.Join(sKey, " ")
+			var sVal []string
+			if len(s) == 0 {
+				// empty value after semicolon
+				sVal = []string{""}
+			} else if 0 < len(s[0]) && (s[0][0] == '{' || s[0][0] == '[') {
+				sVal, s, split = truncEnd(s)
+				if split {
+					return 0, fmt.Errorf("key '%v': invalid value", index)
+				}
+			} else {
+				sVal = []string{s[0]}
+				s = s[1:]
+			}
+			val := reflect.New(v.Type().Elem()).Elem()
+			if _, err := ScanVar(val, sVal); err != nil {
+				return 0, fmt.Errorf("key '%v': %v", index, err)
+			}
+
+			if v.IsNil() {
+				v.Set(reflect.MakeMap(v.Type()))
+			}
+			v.SetMapIndex(key, val)
+		}
 	case reflect.Struct:
-		for j := 0; j < v.NumField(); j++ {
-			if len(s) <= n {
-				return 0, fmt.Errorf("missing values")
+		var split bool
+		if len(s[0]) == 0 || s[0][0] != '{' {
+			return 0, fmt.Errorf("missing value")
+		} else if s, _, split = truncEnd(s); s == nil || split {
+			return 0, fmt.Errorf("invalid struct")
+		}
+		n = len(s)
+		if len(s[0]) == 1 {
+			s = s[1:]
+		} else {
+			s[0] = s[0][1:]
+		}
+		if len(s[len(s)-1]) == 1 {
+			s = s[:len(s)-1]
+		} else {
+			s[len(s)-1] = s[len(s)-1][:len(s[len(s)-1])-1]
+		}
+
+		j := 0
+		for j < v.NumField() {
+			// consume value
+			field := v.Type().Field(j).Name
+			for 0 < len(s) && len(s[0]) == 0 {
+				s = s[1:]
 			}
-			m, err := scanVar(v.Field(j), s[n:])
-			if err != nil {
-				return 0, err
+			if len(s) == 0 {
+				break
 			}
-			n += m
+			var sVal []string
+			if s[0][0] == '{' || s[0][0] == '[' {
+				sVal, s, split = truncEnd(s)
+				if split {
+					return 0, fmt.Errorf("field %v: invalid value", field)
+				}
+			} else {
+				sVal = []string{s[0]}
+				s = s[1:]
+			}
+			if _, err := ScanVar(v.Field(j), sVal); err != nil {
+				return 0, fmt.Errorf("field %v: %v", field, err)
+			}
+			j++
+		}
+		if j != v.NumField() {
+			return 0, fmt.Errorf("missing values")
+		} else if len(s) != 0 {
+			return 0, fmt.Errorf("too many values")
 		}
 	default:
-		panic(fmt.Sprintf("unsupported type %s", v.Type())) // should never happen
+		panic(fmt.Sprintf("unsupported type %v", v.Type())) // should never happen
 	}
 	return n, nil
 }
@@ -754,6 +1029,8 @@ func isValidSubType(t reflect.Type) bool {
 		return true
 	case reflect.Array, reflect.Slice:
 		return isValidSubType(t.Elem())
+	case reflect.Map:
+		return isValidSubType(t.Key()) && isValidSubType(t.Elem())
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			if !isValidSubType(t.Field(i).Type) {
