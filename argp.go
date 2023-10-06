@@ -26,6 +26,7 @@ type Var struct {
 	Rest        bool
 	Default     interface{} // nil is not used
 	Description string
+	isSet       bool
 }
 
 // IsOption returns true for an option
@@ -192,6 +193,14 @@ func NewCmd(cmd Cmd, description string) *Argp {
 		}
 	}
 	return argp
+}
+
+// IsSet returns true if the option is set
+func (argp *Argp) IsSet(name string) bool {
+	if v := argp.findName(name); v != nil {
+		return v.isSet
+	}
+	return false
 }
 
 // AddOpt adds an option
@@ -502,6 +511,23 @@ func (argp *Argp) Parse() {
 	}
 }
 
+func (argp *Argp) findName(name string) *Var {
+	if name == "" {
+		return nil
+	}
+	for _, v := range argp.vars {
+		if v.Name == name || v.Long == name {
+			return v
+		} else if v.Short != 0 && utf8.RuneCountInString(name) == 1 {
+			r, _ := utf8.DecodeRuneInString(name)
+			if r == v.Short {
+				return v
+			}
+		}
+	}
+	return nil
+}
+
 func (argp *Argp) findShort(short rune) *Var {
 	for _, v := range argp.vars {
 		if v.Short != 0 && v.Short == short {
@@ -601,6 +627,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 						i--
 					}
 				}
+				v.isSet = true
 			} else {
 				for j := 1; j < len(arg); {
 					name, n := utf8.DecodeRuneInString(arg[j:])
@@ -641,6 +668,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 						}
 						break
 					}
+					v.isSet = true
 				}
 			}
 		} else if 0 < len(arg) {
@@ -658,6 +686,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 		if _, err := ScanVar(v.Value, []string{arg}); err != nil {
 			return argp, nil, fmt.Errorf("argument %d: %v", index, err)
 		}
+		v.isSet = true
 		index++
 	}
 	for _, v := range argp.vars {
@@ -672,6 +701,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	if v != nil {
 		v.Set(rest)
 		rest = rest[:0]
+		v.isSet = true
 	}
 	return argp, rest, nil
 }
@@ -773,7 +803,7 @@ func scanIndexedVar(v reflect.Value, indices []string, s []string) (int, error) 
 			panic(fmt.Sprintf("index '%v': unsupported type %v", indices[0], v.Type())) // should never happen
 		}
 	}
-	if len(s) == 0 && v.Kind() == reflect.Bool {
+	if v.Kind() == reflect.Bool {
 		v.SetBool(true)
 		return 0, nil
 	}
@@ -796,14 +826,10 @@ func ScanVar(v reflect.Value, s []string) (int, error) {
 	case reflect.Bool:
 		i, err := strconv.ParseBool(s[0])
 		if err != nil {
-			if len(s[0]) == 0 || s[0][0] != '-' {
-				return 0, fmt.Errorf("invalid boolean '%v'", s[0])
-			}
-			v.SetBool(true)
-		} else {
-			v.SetBool(i)
-			n++
+			return 0, fmt.Errorf("invalid boolean '%v'", s[0])
 		}
+		v.SetBool(i)
+		n++
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		i, err := strconv.ParseInt(s[0], 10, 64)
 		if err != nil {
@@ -831,6 +857,7 @@ func ScanVar(v reflect.Value, s []string) (int, error) {
 			return 0, fmt.Errorf("missing value")
 		} else if s[0][0] != '[' {
 			comma = true
+			s = s[:1]
 		} else if s, _, split = truncEnd(s); s == nil || split {
 			if v.Kind() == reflect.Slice {
 				return 0, fmt.Errorf("invalid slice")

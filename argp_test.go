@@ -196,7 +196,6 @@ func TestArgpErrors(t *testing.T) {
 		args []string
 		err  string
 	}{
-		{[]string{"--bool", "5"}, "option --bool: invalid boolean '5'"},
 		{[]string{"--string"}, "option --string: missing value"},
 		{[]string{"--int", "string"}, "option --int: invalid integer 'string'"},
 		{[]string{"--uint", "-1"}, "option --uint: invalid positive integer '-1'"},
