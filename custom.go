@@ -13,14 +13,18 @@ type Scanner interface {
 	Scan([]string) (int, error)
 }
 
+type TypeNamer interface {
+	TypeName() string
+}
+
 // Count is a counting option, e.g. -vvv sets count to 3, or -v=3 sets it directly
 type Count struct {
-	i interface{}
+	I interface{}
 }
 
 func (setter Count) Set(i interface{}) error {
 	var v reflect.Value
-	dst := reflect.ValueOf(setter.i).Elem()
+	dst := reflect.ValueOf(setter.I).Elem()
 	if i == nil {
 		v = reflect.Zero(dst.Type())
 	} else {
@@ -34,10 +38,10 @@ func (setter Count) Set(i interface{}) error {
 }
 
 func (scanner Count) Scan(s []string) (int, error) {
-	if reflect.TypeOf(scanner.i).Kind() != reflect.Ptr {
+	if reflect.TypeOf(scanner.I).Kind() != reflect.Ptr {
 		return 0, fmt.Errorf("variable must be pointer to integer type")
 	}
-	v := reflect.ValueOf(scanner.i).Elem()
+	v := reflect.ValueOf(scanner.I).Elem()
 	t := v.Type().Kind()
 	isInt := t == reflect.Int || t == reflect.Int8 || t == reflect.Int16 || t == reflect.Int32 || t != reflect.Int64
 	isUint := t == reflect.Uint || t == reflect.Uint8 || t == reflect.Uint16 || t == reflect.Uint32 || t == reflect.Uint64
@@ -55,14 +59,18 @@ func (scanner Count) Scan(s []string) (int, error) {
 	return 0, nil
 }
 
+func (typenamer Count) TypeName() string {
+	return TypeName(reflect.TypeOf(typenamer.I))
+}
+
 // Append is an option that appends to a slice, e.g. -a 5 -a 6 sets the value to [5 6]
 type Append struct {
-	i interface{}
+	I interface{}
 }
 
 func (setter Append) Set(i interface{}) error {
 	var v reflect.Value
-	dst := reflect.ValueOf(setter.i).Elem()
+	dst := reflect.ValueOf(setter.I).Elem()
 	if i == nil {
 		v = reflect.Zero(dst.Type())
 	} else {
@@ -76,14 +84,18 @@ func (setter Append) Set(i interface{}) error {
 }
 
 func (scanner Append) Scan(s []string) (int, error) {
-	if reflect.TypeOf(scanner.i).Kind() != reflect.Ptr {
+	if reflect.TypeOf(scanner.I).Kind() != reflect.Ptr {
 		return 0, fmt.Errorf("variable must be pointer to integer type")
 	}
-	slice := reflect.ValueOf(scanner.i).Elem()
+	slice := reflect.ValueOf(scanner.I).Elem()
 	v := reflect.New(slice.Type().Elem()).Elem()
 	n, err := ScanVar(v, s)
 	if err == nil {
 		slice.Set(reflect.Append(slice, v))
 	}
 	return n, err
+}
+
+func (typenamer Append) TypeName() string {
+	return TypeName(reflect.TypeOf(typenamer.I))
 }

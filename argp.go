@@ -118,27 +118,27 @@ func NewCmd(cmd Cmd, description string) *Argp {
 					variable.Long = variable.Name
 				} else if long != "" {
 					if !isValidName(long) {
-						panic("option names must be unicode letters or numbers")
+						panic(fmt.Sprintf("invalid option name: --%v", long))
 					} else if argp.findLong(long) != nil {
-						panic(fmt.Sprintf("long option name already exists: --%v", long))
+						panic(fmt.Sprintf("option name already exists: --%v", long))
 					}
 					variable.Long = strings.ToLower(long)
 				}
 				if short != "" {
 					if !isValidName(short) {
-						panic("option names must be unicode letters or numbers")
+						panic(fmt.Sprintf("invalid option name: --%v", short))
 					}
 					r, n := utf8.DecodeRuneInString(short)
 					if len(short) != n || n == 0 {
-						panic("short option names must be one character long")
+						panic(fmt.Sprintf("option name must be one character: -%v", short))
 					} else if argp.findShort(r) != nil {
-						panic(fmt.Sprintf("short option name already exists: -%v", string(r)))
+						panic(fmt.Sprintf("option name already exists: -%v", string(r)))
 					}
 					variable.Short = r
 				}
 				if index != "" {
 					if long != "" || short != "" {
-						panic("can not set both long/short option names and index")
+						panic("can not set both an option name and index")
 					}
 					if index == "*" {
 						if argp.findRest() != nil {
@@ -209,31 +209,33 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, def interface{}, d
 
 	if !isValidType(v.Type()) {
 		panic(fmt.Sprintf("unsupported type %s", v.Type()))
+	} else if short == "" && long == "" {
+		panic("must set short or long variable name")
 	}
 
 	if long != "" {
 		if !isValidName(long) {
-			panic("option names must be unicode letters or numbers")
+			panic(fmt.Sprintf("invalid option name: --%v", long))
 		} else if argp.findLong(long) != nil {
-			panic(fmt.Sprintf("long option name already exists: --%v", long))
+			panic(fmt.Sprintf("option name already exists: --%v", long))
 		}
 		variable.Long = strings.ToLower(long)
 	}
 	if short != "" {
 		if !isValidName(short) {
-			panic("option names must be unicode letters or numbers")
+			panic(fmt.Sprintf("invalid option name: -%v", short))
 		}
 		r, n := utf8.DecodeRuneInString(short)
 		if len(short) != n || n == 0 {
-			panic("short option names must be one character long")
+			panic(fmt.Sprintf("option name must be one character: -%v", short))
 		} else if argp.findShort(r) != nil {
-			panic(fmt.Sprintf("short option name already exists: -%v", string(r)))
+			panic(fmt.Sprintf("option name already exists: -%v", string(r)))
 		}
 		variable.Short = r
 	}
 	if def != nil {
 		if _, ok := dst.(Setter); !ok && !reflect.ValueOf(def).CanConvert(v.Type()) {
-			panic(fmt.Errorf("default: expected type %v", v.Type()))
+			panic(fmt.Sprintf("default: expected type %v", v.Type()))
 		}
 		variable.Default = def
 	}
@@ -267,10 +269,33 @@ func (argp *Argp) AddVal(dst interface{}, def interface{}, description string) {
 
 	if def != nil {
 		if _, ok := dst.(Setter); !ok && !reflect.ValueOf(def).CanConvert(v.Type()) {
-			panic(fmt.Errorf("default: expected type %v", v.Type()))
+			panic(fmt.Sprintf("default: expected type %v", v.Type()))
 		}
 		variable.Default = def
 	}
+	variable.Description = description
+	argp.vars = append(argp.vars, variable)
+}
+
+func (argp *Argp) AddRest(dst interface{}, name, description string) {
+	v := reflect.ValueOf(dst)
+	if _, ok := dst.(Scanner); !ok && v.Type().Kind() != reflect.Ptr {
+		panic("dst: must pass pointer to variable or comply with argp.Scanner interface")
+	} else if !ok {
+		v = v.Elem()
+	}
+
+	variable := &Var{}
+	variable.Value = v
+	variable.Name = strings.ToLower(name)
+	variable.Index = -1
+
+	if argp.findRest() != nil {
+		panic("rest option already exists")
+	} else if v.Kind() != reflect.Slice || v.Type().Elem().Kind() != reflect.String {
+		panic("rest option must be of type []string")
+	}
+	variable.Rest = true
 	variable.Description = description
 	argp.vars = append(argp.vars, variable)
 }
@@ -320,18 +345,22 @@ func (argp *Argp) PrintHelp() {
 	}
 	if 0 < len(arguments) {
 		for _, v := range arguments {
-			if v.Rest {
-				args += " [" + v.Long + "...]"
-			} else {
+			if !v.Rest {
 				args += " [" + v.Long + "]"
 			}
 		}
+		if rest := argp.findRest(); rest != nil {
+			args += " " + rest.Name + "..."
+		}
+	}
+	if 0 < len(arguments) || len(argp.cmds) == 0 {
 		fmt.Printf("Usage: %s%s\n", base, args)
 	}
 
 	if 0 < len(options) {
 		fmt.Printf("\nOptions:\n")
 		nMax := 0
+		types := []string{}
 		for _, v := range options {
 			n := 0
 			if v.Short != 0 {
@@ -342,6 +371,16 @@ func (argp *Argp) PrintHelp() {
 			} else if v.Long != "" {
 				n += 8 + len(v.Long)
 			}
+
+			var typename string
+			if typenamer, ok := v.Value.Interface().(TypeNamer); ok {
+				typename = typenamer.TypeName()
+			} else {
+				typename = TypeName(v.Value.Type())
+			}
+			types = append(types, typename)
+			n += 1 + len(typename)
+
 			if nMax < n {
 				nMax = n
 			}
@@ -351,7 +390,7 @@ func (argp *Argp) PrintHelp() {
 		} else if nMax < 10 {
 			nMax = 10
 		}
-		for _, v := range options {
+		for i, v := range options {
 			n := 0
 			if v.Short != 0 {
 				fmt.Printf("  -%s", string(v.Short))
@@ -364,6 +403,8 @@ func (argp *Argp) PrintHelp() {
 				fmt.Printf("      --%s", v.Long)
 				n += 8 + len(v.Long)
 			}
+			fmt.Printf(" %s", types[i])
+			n += 1 + len(types[i])
 			if nMax < n {
 				fmt.Printf("\n")
 				n = 0
@@ -428,16 +469,16 @@ func (argp *Argp) PrintHelp() {
 }
 
 // Parse parses the command line arguments and returns the remaining unparsed arguments. When the main command was instantiated with `NewCmd` instead, this command will not return and you need to catch the remaining arguments with `index="*"` in the struct tag.
-func (argp *Argp) Parse() []string {
+func (argp *Argp) Parse() {
 	sub, rest, err := argp.parse(os.Args[1:])
 	if err != nil {
 		fmt.Printf("%v\n\n", err)
 		sub.PrintHelp()
 		os.Exit(1)
-	} else if sub.help || sub.Cmd == nil {
+	} else if sub.help {
 		sub.PrintHelp()
 		os.Exit(0)
-	} else {
+	} else if sub.Cmd != nil {
 		if len(rest) != 0 {
 			msg := "unknown arguments"
 			if len(rest) == 1 {
@@ -459,7 +500,6 @@ func (argp *Argp) Parse() []string {
 			os.Exit(0)
 		}
 	}
-	return rest
 }
 
 func (argp *Argp) findShort(short rune) *Var {
@@ -1036,6 +1076,26 @@ func isValidSubType(t reflect.Type) bool {
 		return true
 	}
 	return false
+}
+
+func TypeName(t reflect.Type) string {
+	k := t.Kind()
+	if k == reflect.Int || k == reflect.Int8 || k == reflect.Int16 || k == reflect.Int32 || k == reflect.Int64 {
+		return "int"
+	} else if k == reflect.Uint || k == reflect.Uint8 || k == reflect.Uint16 || k == reflect.Uint32 || k == reflect.Uint64 {
+		return "uint"
+	} else if k == reflect.Float32 || k == reflect.Float64 {
+		return "float"
+	} else if k == reflect.Array || k == reflect.Slice {
+		return "[]" + TypeName(t.Elem())
+	} else if k == reflect.Map {
+		return "map[" + TypeName(t.Key()) + "]" + TypeName(t.Elem())
+	} else if k == reflect.String {
+		return "string"
+	} else if k == reflect.Struct {
+		return "struct"
+	}
+	return ""
 }
 
 func optionCmp(vars []*Var) func(int, int) bool {
