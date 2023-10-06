@@ -324,8 +324,23 @@ func (argp *Argp) AddCmd(cmd Cmd, name, description string) *Argp {
 	return sub
 }
 
+func wrapString(s string, cols int) (string, string) {
+	if len(s) <= cols {
+		return s, ""
+	}
+	minWidth := int(0.8*float64(cols) + 0.5)
+	for i := cols; minWidth <= i; i-- {
+		if s[i] == ' ' {
+			return s[:i], s[i+1:]
+		}
+	}
+	return s[:cols], s[cols:]
+}
+
 // PrintHelp prints the help overview. This is automatically called when unknown or bad options are passed, but you can call this explicitly in other cases.
 func (argp *Argp) PrintHelp() {
+	_, cols, _ := TerminalSize()
+
 	base := argp.name
 	parent := argp.parent
 	for parent != nil {
@@ -388,7 +403,9 @@ func (argp *Argp) PrintHelp() {
 				typename = TypeName(v.Value.Type())
 			}
 			types = append(types, typename)
-			n += 1 + len(typename)
+			if typename != "" {
+				n += 1 + len(typename)
+			}
 
 			if nMax < n {
 				nMax = n
@@ -412,13 +429,30 @@ func (argp *Argp) PrintHelp() {
 				fmt.Printf("      --%s", v.Long)
 				n += 8 + len(v.Long)
 			}
-			fmt.Printf(" %s", types[i])
-			n += 1 + len(types[i])
+			if types[i] != "" {
+				fmt.Printf(" %s", types[i])
+				n += 1 + len(types[i])
+			}
 			if nMax < n {
 				fmt.Printf("\n")
 				n = 0
 			}
-			fmt.Printf("%s  %s\n", strings.Repeat(" ", nMax-n), v.Description)
+			fmt.Printf("%s  ", strings.Repeat(" ", nMax-n))
+			if cols < 60 {
+				fmt.Printf("%s\n", v.Description)
+			} else if 0 < len(v.Description) {
+				n = nMax + 2
+				desc := v.Description
+				for {
+					var s string
+					s, desc = wrapString(desc, cols-n)
+					fmt.Printf("%s\n", s)
+					if len(desc) == 0 {
+						break
+					}
+					fmt.Printf(strings.Repeat(" ", n))
+				}
+			}
 		}
 	}
 
