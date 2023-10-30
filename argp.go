@@ -623,12 +623,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	}
 
 	rest := []string{}
-	kk := 0
 	for i := 0; i < len(args); i++ {
-		if 5 < kk {
-			break
-		}
-		kk++
 		arg := args[i]
 		if arg == "--" {
 			rest = append(rest, args[i+1:]...)
