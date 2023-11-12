@@ -886,7 +886,6 @@ func ScanVar(v reflect.Value, s []string) (int, error) {
 			return 0, fmt.Errorf("missing value")
 		} else if s[0][0] != '[' {
 			comma = true
-			s = s[:1]
 		} else if s, _, split = truncEnd(s); s == nil || split {
 			if v.Kind() == reflect.Slice {
 				return 0, fmt.Errorf("invalid slice")
