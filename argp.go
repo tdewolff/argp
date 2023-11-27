@@ -109,7 +109,7 @@ func NewCmd(cmd Cmd, description string) *Argp {
 				long, hasLong := tfield.Tag.Lookup("long")
 				short := tfield.Tag.Get("short")
 				index := tfield.Tag.Get("index")
-				def := tfield.Tag.Get("default")
+				def, hasDef := tfield.Tag.Lookup("default")
 				description := tfield.Tag.Get("desc")
 
 				if name != "" {
@@ -163,8 +163,12 @@ func NewCmd(cmd Cmd, description string) *Argp {
 						}
 					}
 				}
-				if def != "" {
-					variable.Default = def
+				if hasDef {
+					defVal := reflect.New(vfield.Type()).Elem()
+					if _, err := ScanVar(defVal, []string{def}); err != nil {
+						panic(fmt.Sprintf("default: %v", err))
+					}
+					variable.Default = defVal.Interface()
 				}
 				if description != "" {
 					variable.Description = description
@@ -438,11 +442,15 @@ func (argp *Argp) PrintHelp() {
 				n = 0
 			}
 			fmt.Printf("%s  ", strings.Repeat(" ", nMax-n))
+
+			desc := v.Description
+			if v.Default != nil {
+				desc += fmt.Sprintf(" (default: %v)", v.Default)
+			}
 			if cols < 60 {
-				fmt.Printf("%s\n", v.Description)
-			} else if 0 < len(v.Description) {
+				fmt.Printf("%s\n", desc)
+			} else if 0 < len(desc) {
 				n = nMax + 2
-				desc := v.Description
 				for {
 					var s string
 					s, desc = wrapString(desc, cols-n)
@@ -518,10 +526,10 @@ func (argp *Argp) Parse() {
 		fmt.Printf("%v\n\n", err)
 		sub.PrintHelp()
 		os.Exit(1)
-	} else if sub.help {
+	} else if sub.help || sub.Cmd == nil {
 		sub.PrintHelp()
 		os.Exit(0)
-	} else if sub.Cmd != nil {
+	} else {
 		if len(rest) != 0 {
 			msg := "unknown arguments"
 			if len(rest) == 1 {
@@ -832,11 +840,12 @@ func scanIndexedVar(v reflect.Value, indices []string, s []string) (int, error) 
 			panic(fmt.Sprintf("index '%v': unsupported type %v", indices[0], v.Type())) // should never happen
 		}
 	}
-	if v.Kind() == reflect.Bool {
+	n, err := ScanVar(v, s)
+	if err != nil && v.Kind() == reflect.Bool {
 		v.SetBool(true)
 		return 0, nil
 	}
-	return ScanVar(v, s)
+	return n, err
 }
 
 func ScanVar(v reflect.Value, s []string) (int, error) {
