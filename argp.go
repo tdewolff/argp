@@ -526,10 +526,10 @@ func (argp *Argp) Parse() {
 		fmt.Printf("%v\n\n", err)
 		sub.PrintHelp()
 		os.Exit(1)
-	} else if sub.help || sub.Cmd == nil {
+	} else if sub.help || argp != sub && sub.Cmd == nil {
 		sub.PrintHelp()
 		os.Exit(0)
-	} else {
+	} else if sub.Cmd != nil {
 		if len(rest) != 0 {
 			msg := "unknown arguments"
 			if len(rest) == 1 {
