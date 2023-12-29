@@ -119,43 +119,43 @@ func NewCmd(cmd Cmd, description string) *Argp {
 					variable.Long = variable.Name
 				} else if long != "" {
 					if !isValidName(long) {
-						panic(fmt.Sprintf("invalid option name: --%v", long))
+						panic(fmt.Sprintf("option %v: invalid long option name: --%v", variable.Name, long))
 					} else if argp.findLong(long) != nil {
-						panic(fmt.Sprintf("option name already exists: --%v", long))
+						panic(fmt.Sprintf("option %v: long option name already exists: --%v", variable.Name, long))
 					}
 					variable.Long = strings.ToLower(long)
 				}
 				if short != "" {
 					if !isValidName(short) {
-						panic(fmt.Sprintf("invalid option name: --%v", short))
+						panic(fmt.Sprintf("option %v: invalid option name: --%v", variable.Name, short))
 					}
 					r, n := utf8.DecodeRuneInString(short)
 					if len(short) != n || n == 0 {
-						panic(fmt.Sprintf("option name must be one character: -%v", short))
+						panic(fmt.Sprintf("option %v: shoft option name must be one character: -%v", variable.Name, short))
 					} else if argp.findShort(r) != nil {
-						panic(fmt.Sprintf("option name already exists: -%v", string(r)))
+						panic(fmt.Sprintf("option %v: shoft option name already exists: -%v", variable.Name, string(r)))
 					}
 					variable.Short = r
 				}
 				if index != "" {
 					if long != "" || short != "" {
-						panic("can not set both an option name and index")
+						panic(fmt.Sprintf("option %v: can not set both an option name and index", variable.Name))
 					}
 					if index == "*" {
 						if argp.findRest() != nil {
-							panic("rest option already exists")
+							panic(fmt.Sprintf("option %v: rest option already exists", variable.Name))
 						} else if def != "" {
-							panic("rest option can not have a default value")
+							panic(fmt.Sprintf("option %v: rest option can not have a default value", variable.Name))
 						} else if variable.Value.Kind() != reflect.Slice || variable.Value.Type().Elem().Kind() != reflect.String {
-							panic("rest option must be of type []string")
+							panic(fmt.Sprintf("option %v: rest option must be of type []string", variable.Name))
 						}
 						variable.Rest = true
 					} else {
 						i, err := strconv.Atoi(index)
 						if err != nil || i < 0 {
-							panic("index must be a non-negative integer or *")
+							panic(fmt.Sprintf("option %v: index must be a non-negative integer or *", variable.Name))
 						} else if argp.findIndex(i) != nil {
-							panic(fmt.Sprintf("option index already exists: %v", i))
+							panic(fmt.Sprintf("option %v: option index already exists: %v", variable.Name, i))
 						}
 						variable.Index = i
 						if maxIndex < i {
@@ -166,9 +166,13 @@ func NewCmd(cmd Cmd, description string) *Argp {
 				if hasDef {
 					defVal := reflect.New(vfield.Type()).Elem()
 					if _, err := ScanVar(defVal, []string{def}); err != nil {
-						panic(fmt.Sprintf("default: %v", err))
+						panic(fmt.Sprintf("option %v: bad default value: %v", variable.Name, err))
 					}
-					variable.Default = defVal.Interface()
+					if vfield.Kind() != reflect.Bool {
+						variable.Default = defVal.Interface()
+					} else if defVal.Bool() != false {
+						panic(fmt.Sprintf("option %v: default value for boolean must be false", variable.Name))
+					}
 				}
 				if description != "" {
 					variable.Description = description
@@ -445,7 +449,10 @@ func (argp *Argp) PrintHelp() {
 
 			desc := v.Description
 			if v.Default != nil {
-				desc += fmt.Sprintf(" (default: %v)", v.Default)
+				if 0 < len(desc) {
+					desc += " "
+				}
+				desc += fmt.Sprintf("(default: %v)", v.Default)
 			}
 			if cols < 60 {
 				fmt.Printf("%s\n", desc)
@@ -460,6 +467,8 @@ func (argp *Argp) PrintHelp() {
 					}
 					fmt.Printf(strings.Repeat(" ", n))
 				}
+			} else {
+				fmt.Printf("\n")
 			}
 		}
 	}
