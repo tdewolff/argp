@@ -62,6 +62,7 @@ func TestArgpTypes(t *testing.T) {
 		{[]string{"--float32", "36"}, STypes{Float32: 36}},
 		{[]string{"--float64", "36"}, STypes{Float64: 36}},
 		{[]string{"--array", "[1", "2", "3]"}, STypes{Array: [3]int{1, 2, 3}}},
+		{[]string{"--array[1]", "2"}, STypes{Array: [3]int{0, 2, 0}}},
 		{[]string{"--slice", "[foo", "bar]"}, STypes{Slice: []string{"foo", "bar"}}},
 		{[]string{"--slice", "[foo", "", "]"}, STypes{Slice: []string{"foo", ""}}},
 		{[]string{"--slice", "[", "foo", "bar", "]"}, STypes{Slice: []string{"foo", "bar"}}},
@@ -76,7 +77,7 @@ func TestArgpTypes(t *testing.T) {
 		{[]string{"--map", "{foo:2 bar:3}"}, STypes{Map: map[string]string{"foo": "2 bar:3"}}},
 		{[]string{"--map", "{foo:2", "bar:3}"}, STypes{Map: map[string]string{"foo": "2", "bar": "3"}}},
 		{[]string{"--map", "{", "foo", ":", "2", "", ":", "", "}"}, STypes{Map: map[string]string{"foo": "2", "": ""}}},
-		{[]string{"--map.foo=2", "--map.bar=3"}, STypes{Map: map[string]string{"foo": "2", "bar": "3"}}},
+		{[]string{"--map[foo]=2", "--map[bar]=3"}, STypes{Map: map[string]string{"foo": "2", "bar": "3"}}},
 		{[]string{"--struct", "{true", "{5.0}}"}, STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
 		{[]string{"-s", "{true", "{5.0}}"}, STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
 		{[]string{"--struct.bool", "--struct.struct.float64", "5.0"}, STypes{Struct: STypesStruct{true, struct{ Float64 float64 }{5.0}}}},
@@ -201,15 +202,15 @@ func TestArgpErrors(t *testing.T) {
 		{[]string{"--uint", "-1"}, "option --uint: invalid positive integer '-1'"},
 		{[]string{"--float64", "."}, "option --float64: invalid number '.'"},
 		{[]string{"--array", "[1"}, "option --array: invalid array"},
-		{[]string{"--array", "[1]"}, "option --array: expected 3 values"},
-		{[]string{"--array", "[1", "2", "s]"}, "option --array: index 2: invalid integer 's'"},
+		{[]string{"--array", "[1]"}, "option --array: expected 3 values for array"},
+		{[]string{"--array", "[1", "2", "s]"}, "option --array: array index 2: invalid integer 's'"},
 		{[]string{"--slice", "[s"}, "option --slice: invalid slice"},
 		{[]string{"--map", "{foo:2"}, "option --map: invalid map"},
-		{[]string{"--map", "{foo", "2}"}, "option --map: key 'foo': missing semicolon"},
+		{[]string{"--map", "{foo", "2}"}, "option --map: map key foo: missing semicolon"},
 		{[]string{"--struct", "{true"}, "option --struct: invalid struct"},
-		{[]string{"--struct", "{true}"}, "option --struct: missing values"},
-		{[]string{"--struct", "{5}"}, "option --struct: field Bool: invalid boolean '5'"},
-		{[]string{"--struct", "{true", "{x}}"}, "option --struct: field Struct: field Float64: invalid number 'x'"},
+		{[]string{"--struct", "{true}"}, "option --struct: missing struct fields"},
+		{[]string{"--struct", "{5}"}, "option --struct: struct field Bool: invalid boolean '5'"},
+		{[]string{"--struct", "{true", "{x}}"}, "option --struct: struct field Struct: struct field Float64: invalid number 'x'"},
 	}
 
 	for _, tt := range tests {
@@ -229,21 +230,21 @@ func TestArgpErrors(t *testing.T) {
 	var cmd *Argp
 
 	cmd = New("description")
-	cmd.AddVal(&[]int{}, nil, "")
+	cmd.AddVal(&[]int{}, "")
 	_, _, err = cmd.parse([]string{"5,s"})
-	test.T(t, err, fmt.Errorf("argument 0: index 1: invalid integer 's'"))
+	test.T(t, err, fmt.Errorf("argument 0: slice index 1: invalid integer 's'"))
 
 	cmd = New("description")
-	cmd.AddVal(&map[int]int{}, nil, "")
+	cmd.AddVal(&map[int]int{}, "")
 	_, _, err = cmd.parse([]string{"{s:5}"})
-	test.T(t, err, fmt.Errorf("argument 0: key: invalid integer 's'"))
+	test.T(t, err, fmt.Errorf("argument 0: map key s: invalid integer 's'"))
 	_, _, err = cmd.parse([]string{"{5:s}"})
-	test.T(t, err, fmt.Errorf("argument 0: key '5': invalid integer 's'"))
+	test.T(t, err, fmt.Errorf("argument 0: map key 5: invalid integer 's'"))
 
 	cmd = New("description")
-	cmd.AddOpt(&map[int]int{}, "", "val", nil, "")
-	_, _, err = cmd.parse([]string{"--val.s=6"})
-	test.T(t, err, fmt.Errorf("option --val.s: index 's': invalid integer"))
+	cmd.AddOpt(&map[int]int{}, "", "val", "")
+	_, _, err = cmd.parse([]string{"--val[s]=6"})
+	test.T(t, err, fmt.Errorf("option --val[s]: map key s: invalid integer 's'"))
 }
 
 type SOptions struct {
@@ -297,11 +298,11 @@ func TestArgp(t *testing.T) {
 }
 
 func TestArgpAdd(t *testing.T) {
-	var o int64
+	o := int64(4)
 	var v bool
 	argp := New("description")
-	argp.AddOpt(&o, "", "long", 4, "description")
-	argp.AddVal(&v, false, "description")
+	argp.AddOpt(&o, "", "long", "description")
+	argp.AddVal(&v, "description")
 
 	_, _, err := argp.parse([]string{"--long", "8", "true"})
 	test.Error(t, err)
@@ -317,7 +318,7 @@ func TestArgpAdd(t *testing.T) {
 func TestArgpUTF8(t *testing.T) {
 	var v bool
 	argp := New("description")
-	argp.AddOpt(&v, "á", "", false, "description")
+	argp.AddOpt(&v, "á", "", "description")
 
 	_, _, err := argp.parse([]string{"-á"})
 	test.Error(t, err)
@@ -327,7 +328,7 @@ func TestArgpUTF8(t *testing.T) {
 func TestArgpCount(t *testing.T) {
 	var i int
 	argp := New("description")
-	argp.AddOpt(Count{&i}, "i", "int", 0, "description")
+	argp.AddOpt(Count{&i}, "i", "int", "description")
 
 	_, _, err := argp.parse([]string{"-i", "-ii", "--int", "--int"})
 	test.Error(t, err)
@@ -346,8 +347,8 @@ func TestArgpAppend(t *testing.T) {
 	var i []int
 	var s []string
 	argp := New("description")
-	argp.AddOpt(Append{&i}, "i", "int", nil, "description")
-	argp.AddOpt(Append{&s}, "s", "string", nil, "description")
+	argp.AddOpt(Append{&i}, "i", "int", "description")
+	argp.AddOpt(Append{&s}, "s", "string", "description")
 
 	_, _, err := argp.parse([]string{"-i", "1", "--int", "2"})
 	test.Error(t, err)
@@ -380,8 +381,8 @@ func TestArgpSubCommand(t *testing.T) {
 	sub1 := SSub1{}
 	sub2 := SSub2{}
 	argp := New("description")
-	argp.AddVal(&v, "", "description")
-	argp.AddOpt(&a, "a", "", 0, "description")
+	argp.AddVal(&v, "description")
+	argp.AddOpt(&a, "a", "", "description")
 	argp.AddCmd(&sub1, "one", "description")
 	argp.AddCmd(&sub2, "two", "description")
 
@@ -402,7 +403,7 @@ func TestArgpSubCommand(t *testing.T) {
 func ExampleCount() {
 	var count int
 	argp := New("count variable")
-	argp.AddOpt(Count{&count}, "c", "count", 0, "")
+	argp.AddOpt(Count{&count}, "c", "count", "")
 
 	_, _, err := argp.parse([]string{"-ccc"})
 	if err != nil {
@@ -412,11 +413,23 @@ func ExampleCount() {
 	// Output: 3
 }
 
+func TestCount(t *testing.T) {
+	var count int
+	argp := New("count variable")
+	argp.AddOpt(Count{&count}, "c", "count", "")
+
+	_, _, err := argp.parse([]string{"-ccc"})
+	if err != nil {
+		test.Error(t, err)
+	}
+	test.T(t, count, 3)
+}
+
 type ExampleCustom struct {
 	Num, Div float64
 }
 
-func (e *ExampleCustom) Scan(s []string) (int, error) {
+func (e *ExampleCustom) Scan(name string, s []string) (int, error) {
 	n := 0
 	num := s[0]
 	if idx := strings.IndexByte(s[0], '/'); idx != -1 {
@@ -453,10 +466,22 @@ func (e *ExampleCustom) Scan(s []string) (int, error) {
 	return n + 1, nil
 }
 
+func TestCustomVar(t *testing.T) {
+	custom := ExampleCustom{}
+	argp := New("custom variable")
+	argp.AddOpt(&custom, "", "custom", "")
+
+	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
+	if err != nil {
+		test.Error(t, err)
+	}
+	test.T(t, custom, ExampleCustom{1.0, 2.0})
+}
+
 func ExampleCustomVar() {
 	custom := ExampleCustom{}
 	argp := New("custom variable")
-	argp.AddOpt(&custom, "", "custom", nil, "")
+	argp.AddOpt(&custom, "", "custom", "")
 
 	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
 	if err != nil {

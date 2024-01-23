@@ -10,7 +10,7 @@ type Setter interface {
 }
 
 type Scanner interface {
-	Scan([]string) (int, error)
+	Scan(string, []string) (int, error)
 }
 
 type TypeNamer interface {
@@ -27,30 +27,32 @@ func (setter Count) Set(i interface{}) error {
 	dst := reflect.ValueOf(setter.I).Elem()
 	if i == nil {
 		v = reflect.Zero(dst.Type())
+	} else if val, ok := i.(Count); ok {
+		v = reflect.ValueOf(val.I).Elem()
 	} else {
 		v = reflect.ValueOf(i)
-		if !v.CanConvert(dst.Type()) {
-			return fmt.Errorf("expected type %v", dst.Type())
-		}
+	}
+	if !v.CanConvert(dst.Type()) {
+		return fmt.Errorf("expected type %v", dst.Type())
 	}
 	dst.Set(v.Convert(dst.Type()))
 	return nil
 }
 
-func (scanner Count) Scan(s []string) (int, error) {
+func (scanner Count) Scan(name string, s []string) (int, error) {
 	if reflect.TypeOf(scanner.I).Kind() != reflect.Ptr {
-		return 0, fmt.Errorf("variable must be pointer to integer type")
+		return 0, fmt.Errorf("variable must be a pointer to an integer type")
 	}
 	v := reflect.ValueOf(scanner.I).Elem()
 	t := v.Type().Kind()
 	isInt := t == reflect.Int || t == reflect.Int8 || t == reflect.Int16 || t == reflect.Int32 || t != reflect.Int64
 	isUint := t == reflect.Uint || t == reflect.Uint8 || t == reflect.Uint16 || t == reflect.Uint32 || t == reflect.Uint64
 	if !isInt && !isUint {
-		return 0, fmt.Errorf("variable must be pointer to integer type")
+		return 0, fmt.Errorf("variable must be a pointer to an integer type")
 	}
 	if 0 < len(s) && 0 < len(s[0]) && '0' <= s[0][0] && s[0][0] <= '9' {
 		// don't parse negatives or other options
-		return ScanVar(v, s)
+		return scanValue(v, s)
 	} else if isInt {
 		v.SetInt(v.Int() + 1)
 	} else {
@@ -73,23 +75,25 @@ func (setter Append) Set(i interface{}) error {
 	dst := reflect.ValueOf(setter.I).Elem()
 	if i == nil {
 		v = reflect.Zero(dst.Type())
+	} else if val, ok := i.(Append); ok {
+		v = reflect.ValueOf(val.I).Elem()
 	} else {
 		v = reflect.ValueOf(i)
-		if !v.CanConvert(dst.Type()) {
-			return fmt.Errorf("expected type %v", dst.Type())
-		}
+	}
+	if !v.CanConvert(dst.Type()) {
+		return fmt.Errorf("expected type %v", dst.Type())
 	}
 	dst.Set(v.Convert(dst.Type()))
 	return nil
 }
 
-func (scanner Append) Scan(s []string) (int, error) {
-	if reflect.TypeOf(scanner.I).Kind() != reflect.Ptr {
-		return 0, fmt.Errorf("variable must be pointer to integer type")
+func (scanner Append) Scan(name string, s []string) (int, error) {
+	if t := reflect.TypeOf(scanner.I); t.Kind() != reflect.Ptr || t.Elem().Kind() != reflect.Slice {
+		return 0, fmt.Errorf("variable must be a pointer to a slice")
 	}
 	slice := reflect.ValueOf(scanner.I).Elem()
 	v := reflect.New(slice.Type().Elem()).Elem()
-	n, err := ScanVar(v, s)
+	n, err := scanValue(v, s)
 	if err == nil {
 		slice.Set(reflect.Append(slice, v))
 	}
