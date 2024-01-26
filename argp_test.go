@@ -273,6 +273,7 @@ func TestArgp(t *testing.T) {
 		{[]string{"--baz", "val"}, SOptions{Baz: "val"}, ""},
 		{[]string{"input1", "input2"}, SOptions{Baz: "default"}, "input1 input2"},
 		{[]string{"input1", "--baz", "val", "input2"}, SOptions{Baz: "val"}, "input1 input2"},
+		{[]string{"-a"}, SOptions{Baz: "default", A: true}, ""},
 		{[]string{"-a", "-b", "-c", "5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
 		{[]string{"-a", "-b", "-c=5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
 		{[]string{"-a", "-b", "-c5"}, SOptions{Baz: "default", A: true, B: true, C: 5}, ""},
@@ -427,6 +428,10 @@ func TestCount(t *testing.T) {
 
 type ExampleCustom struct {
 	Num, Div float64
+}
+
+func (e *ExampleCustom) Help() (string, string, string) {
+	return fmt.Sprintf("%v/%v", e.Num, e.Div), "", ""
 }
 
 func (e *ExampleCustom) Scan(name string, s []string) (int, error) {

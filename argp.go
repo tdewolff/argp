@@ -45,9 +45,6 @@ func (v *Var) Set(i interface{}) bool {
 	if !val.CanConvert(v.Value.Type()) {
 		return false
 	}
-	if !v.Value.CanSet() {
-		fmt.Printf("%v %v %T %v", v, v.Value, v.Value.Interface(), val)
-	}
 	v.Value.Set(val.Convert(v.Value.Type()))
 	return true
 }
@@ -101,7 +98,7 @@ func NewCmd(cmd Cmd, description string) *Argp {
 			if vfield.IsValid() {
 				variable := &Var{}
 				variable.Value = vfield
-				variable.Name = strings.ToLower(tfield.Name)
+				variable.Name = fromFieldname(tfield.Name)
 				variable.Index = -1
 
 				if !isValidType(vfield.Type()) {
@@ -168,7 +165,7 @@ func NewCmd(cmd Cmd, description string) *Argp {
 				}
 				if hasDef {
 					defVal := reflect.New(vfield.Type()).Elem()
-					if _, err := scanVar(defVal, "", []string{def}); err != nil {
+					if _, err := scanVar(defVal, "", splitArguments(def)); err != nil {
 						panic(fmt.Sprintf("option %v: bad default value: %v", variable.Name, err))
 					}
 					variable.Default = defVal.Interface()
@@ -228,10 +225,10 @@ func (argp *Argp) IsSet(name string) bool {
 // AddOpt adds an option
 func (argp *Argp) AddOpt(dst interface{}, short, long string, description string) {
 	v := reflect.ValueOf(dst)
-	_, isScanner := dst.(Scanner)
-	if !isScanner && v.Type().Kind() != reflect.Ptr {
-		panic("dst: must pass pointer to variable or comply with argp.Scanner interface")
-	} else if !isScanner {
+	_, isCustom := dst.(Custom)
+	if !isCustom && v.Type().Kind() != reflect.Ptr {
+		panic("dst: must pass pointer to variable or comply with argp.Custom interface")
+	} else if !isCustom {
 		v = v.Elem()
 	}
 
@@ -265,7 +262,7 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, description string
 		}
 		variable.Short = r
 	}
-	if !isScanner {
+	if !isCustom {
 		variable.Default = v.Interface()
 	}
 	variable.Description = description
@@ -275,10 +272,10 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, description string
 // AddVal adds an indexed value
 func (argp *Argp) AddVal(dst interface{}, description string) {
 	v := reflect.ValueOf(dst)
-	_, isScanner := dst.(Scanner)
-	if !isScanner && v.Type().Kind() != reflect.Ptr {
-		panic("dst: must pass pointer to variable or comply with argp.Scanner interface")
-	} else if !isScanner {
+	_, isCustom := dst.(Custom)
+	if !isCustom && v.Type().Kind() != reflect.Ptr {
+		panic("dst: must pass pointer to variable or comply with argp.Custom interface")
+	} else if !isCustom {
 		v = v.Elem()
 	}
 
@@ -294,7 +291,7 @@ func (argp *Argp) AddVal(dst interface{}, description string) {
 			variable.Index = v.Index + 1
 		}
 	}
-	if !isScanner {
+	if !isCustom {
 		variable.Default = v.Interface()
 	}
 	variable.Description = description
@@ -303,10 +300,10 @@ func (argp *Argp) AddVal(dst interface{}, description string) {
 
 func (argp *Argp) AddRest(dst interface{}, name, description string) {
 	v := reflect.ValueOf(dst)
-	_, isScanner := dst.(Scanner)
-	if !isScanner && v.Type().Kind() != reflect.Ptr {
-		panic("dst: must pass pointer to variable or comply with argp.Scanner interface")
-	} else if !isScanner {
+	_, isCustom := dst.(Custom)
+	if !isCustom && v.Type().Kind() != reflect.Ptr {
+		panic("dst: must pass pointer to variable or comply with argp.Custom interface")
+	} else if !isCustom {
 		v = v.Elem()
 	}
 
@@ -320,7 +317,7 @@ func (argp *Argp) AddRest(dst interface{}, name, description string) {
 		panic("rest option must be of type []string")
 	}
 	variable.Rest = true
-	if !isScanner {
+	if !isCustom {
 		variable.Default = v.Interface()
 	}
 	variable.Description = description
@@ -347,7 +344,12 @@ type optionHelp struct {
 func appendStructHelps(helps []optionHelp, name string, v reflect.Value) []optionHelp {
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Type().Field(i)
-		long := name + "." + fromFieldname(field.Name)
+		long := name + "."
+		if name := field.Tag.Get("name"); name != "" {
+			long += name
+		} else {
+			long += fromFieldname(field.Name)
+		}
 		if field.Type.Kind() == reflect.Struct {
 			helps = appendStructHelps(helps, long, v.Field(i))
 		} else {
@@ -370,34 +372,39 @@ func appendStructHelps(helps []optionHelp, name string, v reflect.Value) []optio
 func getOptionHelps(vs []*Var) []optionHelp {
 	helps := []optionHelp{}
 	for _, v := range vs {
-		if v.Value.Kind() == reflect.Struct {
+		var val, typ, desc string
+		if custom, ok := v.Value.Interface().(Custom); ok {
+			val, typ, desc = custom.Help()
+		} else if v.Value.Kind() == reflect.Struct {
 			helps = appendStructHelps(helps, v.Long, v.Value)
+			continue
 		} else {
-			var typ string
-			if typenamer, ok := v.Value.Interface().(TypeNamer); ok {
-				typ = typenamer.TypeName()
-			} else {
-				typ = TypeName(v.Value.Type())
-			}
-			short := ""
-			if v.Short != 0 {
-				short = string(v.Short)
-			}
-			long := v.Long
 			if v.Default != nil && !reflect.ValueOf(v.Default).IsZero() {
-				if long != "" {
-					long += fmt.Sprintf("=%v", v.Default)
-				} else {
-					short += fmt.Sprintf("=%v", v.Default)
-				}
+				val = fmt.Sprint(v.Default)
 			}
-			helps = append(helps, optionHelp{
-				short: short,
-				long:  long,
-				typ:   typ,
-				desc:  v.Description,
-			})
+			typ = TypeName(v.Value.Type())
+			desc = v.Description
 		}
+
+		var short, long string
+		if v.Short != 0 {
+			short = string(v.Short)
+		}
+		long = v.Long
+		if val != "" {
+			if long != "" {
+				long += fmt.Sprintf("=%v", val)
+			} else {
+				short += fmt.Sprintf("=%v", val)
+			}
+		}
+		helps = append(helps, optionHelp{
+			short: short,
+			long:  long,
+			typ:   typ,
+			desc:  desc,
+		})
+
 	}
 	return helps
 }
@@ -673,11 +680,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	// set defaults
 	for _, v := range argp.vars {
 		if v.Default != nil {
-			if setter, ok := v.Value.Interface().(Setter); ok {
-				if err := setter.Set(v.Default); err != nil {
-					return argp, nil, fmt.Errorf("default: %v", err)
-				}
-			} else if ok := v.Set(v.Default); !ok {
+			if ok := v.Set(v.Default); !ok {
 				return argp, nil, fmt.Errorf("default: expected type %v", v.Value.Type())
 			}
 		}
@@ -823,8 +826,8 @@ func truncEnd(s []string) ([]string, []string, bool) {
 
 // scanVar parses a slice of strings into the given value.
 func scanVar(v reflect.Value, name string, s []string) (int, error) {
-	if scanner, ok := v.Interface().(Scanner); ok {
-		// implements Scanner
+	if scanner, ok := v.Interface().(Custom); ok {
+		// implements Custom
 		return scanner.Scan(name, s)
 	}
 
@@ -878,7 +881,18 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 			}
 			return n, err
 		case reflect.Struct:
-			name = toFieldname(name)
+			t := v.Type()
+			found := false
+			for i := 0; i < t.NumField(); i++ {
+				if t.Field(i).Tag.Get("name") == name || fromFieldname(t.Field(i).Name) == name {
+					name = t.Field(i).Name
+					found = true
+					break
+				}
+			}
+			if !found {
+				name = toFieldname(name)
+			}
 			field := v.FieldByName(name)
 			zero := reflect.Value{}
 			if field == zero {
@@ -890,12 +904,6 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 		}
 	}
 
-	if v.Kind() == reflect.Bool && (len(s) == 0 || s[0][0] == '-') {
-		v.SetBool(true)
-		return 0, nil
-	} else if len(s) == 0 {
-		return 0, fmt.Errorf("missing value")
-	}
 	n, err := scanValue(v, s)
 	if err != nil && v.Kind() == reflect.Bool {
 		v.SetBool(true)
@@ -905,6 +913,10 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 }
 
 func scanValue(v reflect.Value, s []string) (int, error) {
+	if len(s) == 0 {
+		return 0, fmt.Errorf("missing value")
+	}
+
 	n := 0
 	switch v.Kind() {
 	case reflect.String:
@@ -1167,10 +1179,10 @@ func isValidName(s string) bool {
 	return true
 }
 
-// isValidType returns true if the destination variable type is supported. Either it implements the Scanner interface, or is a valid base type.
+// isValidType returns true if the destination variable type is supported. Either it implements the Custom interface, or is a valid base type.
 func isValidType(t reflect.Type) bool {
-	if t.Implements(reflect.TypeOf((*Scanner)(nil)).Elem()) {
-		// implements Scanner
+	if t.Implements(reflect.TypeOf((*Custom)(nil)).Elem()) {
+		// implements Custom
 		return true
 	}
 	return isValidBaseType(t)
@@ -1244,6 +1256,22 @@ func sortArgument(vars []*Var) func(int, int) bool {
 	}
 }
 
+func fromFieldname(field string) string {
+	name := make([]byte, 0, len(field))
+	for i, r := range field {
+		if unicode.IsTitle(r) || unicode.IsUpper(r) {
+			rNext, n := utf8.DecodeRuneInString(field[i+utf8.RuneLen(r):])
+			if i != 0 && n != 0 && !unicode.IsTitle(rNext) && !unicode.IsUpper(rNext) {
+				name = append(name, '-')
+			}
+			name = utf8.AppendRune(name, unicode.ToLower(r))
+		} else {
+			name = utf8.AppendRune(name, r)
+		}
+	}
+	return string(name)
+}
+
 func toFieldname(name string) string {
 	field := make([]byte, 0, len(name))
 	capitalize := true
@@ -1260,20 +1288,22 @@ func toFieldname(name string) string {
 	return string(field)
 }
 
-func fromFieldname(field string) string {
-	name := make([]byte, 0, len(field))
-	capitalized := true
-	for _, r := range field {
-		if unicode.IsTitle(r) || unicode.IsUpper(r) {
-			if !capitalized {
-				name = append(name, '-')
-				capitalized = true
+func splitArguments(s string) []string {
+	i := 0
+	args := []string{}
+	for j, r := range s {
+		n := utf8.RuneLen(r)
+		// TODO: support single/double strings and escapes
+		if unicode.IsSpace(r) {
+			if i < j {
+				args = append(args, s[i:j])
+				j = i
 			}
-			name = utf8.AppendRune(name, unicode.ToLower(r))
-		} else {
-			name = utf8.AppendRune(name, r)
-			capitalized = false
+			j += n
 		}
 	}
-	return string(name)
+	if i < len(s) {
+		args = append(args, s[i:])
+	}
+	return args
 }
