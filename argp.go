@@ -372,9 +372,9 @@ func appendStructHelps(helps []optionHelp, name string, v reflect.Value) []optio
 func getOptionHelps(vs []*Var) []optionHelp {
 	helps := []optionHelp{}
 	for _, v := range vs {
-		var val, typ, desc string
+		var val, typ string
 		if custom, ok := v.Value.Interface().(Custom); ok {
-			val, typ, desc = custom.Help()
+			val, typ = custom.Help()
 		} else if v.Value.Kind() == reflect.Struct {
 			helps = appendStructHelps(helps, v.Long, v.Value)
 			continue
@@ -383,7 +383,6 @@ func getOptionHelps(vs []*Var) []optionHelp {
 				val = fmt.Sprint(v.Default)
 			}
 			typ = TypeName(v.Value.Type())
-			desc = v.Description
 		}
 
 		var short, long string
@@ -402,7 +401,7 @@ func getOptionHelps(vs []*Var) []optionHelp {
 			short: short,
 			long:  long,
 			typ:   typ,
-			desc:  desc,
+			desc:  v.Description,
 		})
 
 	}
@@ -471,12 +470,13 @@ func (argp *Argp) PrintHelp() {
 			if o.typ != "" {
 				n += 1 + len(o.typ)
 			}
+			n++ // whitespace before description
 			if nMax < n {
 				nMax = n
 			}
 		}
-		if 28 < nMax {
-			nMax = 28
+		if 30 < nMax {
+			nMax = 30
 		} else if nMax < 10 {
 			nMax = 10
 		}
@@ -497,15 +497,15 @@ func (argp *Argp) PrintHelp() {
 				fmt.Printf(" %s", o.typ)
 				n += 1 + len(o.typ)
 			}
-			if nMax < n {
+			if nMax <= n {
 				fmt.Printf("\n")
 				n = 0
 			}
-			fmt.Printf("%s  ", strings.Repeat(" ", nMax-n))
+			fmt.Printf("%s", strings.Repeat(" ", nMax-n))
 			if cols < 60 {
 				fmt.Printf("%s\n", o.desc)
 			} else if 0 < len(o.desc) {
-				n = nMax + 2
+				n = nMax
 				for {
 					var s string
 					s, o.desc = wrapString(o.desc, cols-n)
@@ -794,36 +794,6 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 	return argp, rest, nil
 }
 
-func truncEnd(s []string) ([]string, []string, bool) {
-	if len(s) == 0 {
-		return []string{}, s, false
-	}
-	levels := []byte{}
-	for n, item := range s {
-		for i := 0; i < len(item); i++ {
-			switch item[i] {
-			case '{', '[':
-				levels = append(levels, item[i]+2)
-			case '}', ']':
-				if len(levels) == 0 || levels[len(levels)-1] != item[i] {
-					return nil, s, false // opening/closing brackets don't match, or too many closing
-				} else if len(levels) == 1 {
-					if i+1 == len(item) {
-						return s[:n+1], s[n+1:], false
-					}
-					// split
-					k := s[n:]
-					s = append(s[:n:n], s[n][:i+1])
-					k[0] = k[0][i+1:]
-					return s, k, true
-				}
-				levels = levels[:len(levels)-1]
-			}
-		}
-	}
-	return nil, s, false // no closing bracket found
-}
-
 // scanVar parses a slice of strings into the given value.
 func scanVar(v reflect.Value, name string, s []string) (int, error) {
 	if scanner, ok := v.Interface().(Custom); ok {
@@ -912,6 +882,37 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 	return n, err
 }
 
+// truncEnd splits the arguments and returns values for an array/slice/map/struct and remaining
+func truncEnd(s []string) ([]string, []string, bool) {
+	if len(s) == 0 {
+		return []string{}, s, false
+	}
+	levels := []byte{}
+	for n, item := range s {
+		for i := 0; i < len(item); i++ {
+			switch item[i] {
+			case '{', '[':
+				levels = append(levels, item[i]+2)
+			case '}', ']':
+				if len(levels) == 0 || levels[len(levels)-1] != item[i] {
+					return nil, s, false // opening/closing brackets don't match, or too many closing
+				} else if len(levels) == 1 {
+					if i+1 == len(item) {
+						return s[:n+1], s[n+1:], false
+					}
+					// split
+					k := s[n:]
+					s = append(s[:n:n], s[n][:i+1])
+					k[0] = k[0][i+1:]
+					return s, k, true
+				}
+				levels = levels[:len(levels)-1]
+			}
+		}
+	}
+	return nil, s, false // no closing bracket found
+}
+
 func scanValue(v reflect.Value, s []string) (int, error) {
 	if len(s) == 0 {
 		return 0, fmt.Errorf("missing value")
@@ -963,9 +964,9 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 			comma = true
 		} else if s, _, split = truncEnd(s); s == nil || split {
 			return 0, fmt.Errorf("invalid %v", typ)
-		}
-		n = len(s)
-		if !comma {
+		} else {
+			// !comma
+			n = len(s)
 			if len(s[0]) == 1 {
 				s = s[1:]
 			} else {
@@ -985,11 +986,13 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 				// consume comma
 				for 0 < len(s) && len(s[0]) == 0 {
 					s = s[1:]
+					n++
 				}
 				if len(s) == 0 || s[0][0] != ',' {
 					break
 				} else if len(s[0]) == 1 {
 					s = s[1:]
+					n++
 				} else {
 					s[0] = s[0][1:]
 				}
@@ -1017,6 +1020,9 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 			} else {
 				sVal = []string{s[0]}
 				s = s[1:]
+				if comma {
+					n++
+				}
 			}
 			val := reflect.New(v.Type().Elem()).Elem()
 			if _, err := scanValue(val, sVal); err != nil {

@@ -6,7 +6,7 @@ import (
 )
 
 type Custom interface {
-	Help() (string, string, string)     // value, type, and description for help
+	Help() (string, string)             // value and type representations for help
 	Scan(string, []string) (int, error) // scan values from command line
 }
 
@@ -15,13 +15,13 @@ type Count struct {
 	I interface{}
 }
 
-func (count Count) Help() (string, string, string) {
+func (count Count) Help() (string, string) {
 	val := ""
 	v := reflect.ValueOf(count.I).Elem()
 	if !v.IsZero() {
 		val = fmt.Sprint(v.Interface())
 	}
-	return val, TypeName(v.Type()), ""
+	return val, TypeName(v.Type())
 }
 
 func (count Count) Scan(name string, s []string) (int, error) {
@@ -51,13 +51,13 @@ type Append struct {
 	I interface{}
 }
 
-func (appnd Append) Help() (string, string, string) {
+func (appnd Append) Help() (string, string) {
 	val := ""
 	v := reflect.ValueOf(appnd.I).Elem()
 	if !v.IsZero() && 0 < v.Len() {
 		val = fmt.Sprint(v.Interface())
 	}
-	return val, TypeName(v.Type()), ""
+	return val, TypeName(v.Type())
 }
 
 func (appnd Append) Scan(name string, s []string) (int, error) {
@@ -65,10 +65,10 @@ func (appnd Append) Scan(name string, s []string) (int, error) {
 		return 0, fmt.Errorf("variable must be a pointer to a slice")
 	}
 	slice := reflect.ValueOf(appnd.I).Elem()
-	v := reflect.New(slice.Type().Elem()).Elem()
+	v := reflect.New(slice.Type()).Elem()
 	n, err := scanValue(v, s)
 	if err == nil {
-		slice.Set(reflect.Append(slice, v))
+		slice.Set(reflect.AppendSlice(slice, v))
 	}
 	return n, err
 }

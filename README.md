@@ -87,9 +87,9 @@ package main
 import "github.com/tdewolff/argp"
 
 func main() {
-    argp := argp.NewCmd(&Main{}, "CLI tool description")
-    argp.AddCmd(&Command{}, "cmd", "Sub command")
-    argp.Parse()
+    cmd := argp.NewCmd(&Main{}, "CLI tool description")
+    cmd.AddCmd(&Command{}, "cmd", "Sub command")
+    cmd.Parse()
 }
 
 type Main struct {
@@ -114,51 +114,51 @@ func (cmd *Command) Run() error {
 ### Options
 Basic types
 ```go
-var v string
-argp.AddOpt(&v, "v", "var", "default", "description")
+var v string = "default"
+cmd.AddOpt(&v, "v", "var", "description")
 
-var v bool
-argp.AddOpt(&v, "v", "var", "true", "description")
+var v bool = true
+cmd.AddOpt(&v, "v", "var", "description")
 
-var v int // also: int8, int16, int32, int64
-argp.AddOpt(&v, "v", "var", "42", "description")
+var v int = 42 // also: int8, int16, int32, int64
+cmd.AddOpt(&v, "v", "var", "description")
 
-var v uint // also: uint8, uint16, uint32, uint64
-argp.AddOpt(&v, "v", "var", "42", "description")
+var v uint = 42 // also: uint8, uint16, uint32, uint64
+cmd.AddOpt(&v, "v", "var", "description")
 
-var v float64 // also: float32
-argp.AddOpt(&v, "v", "var", "4.2", "description")
+var v float64 = 4.2 // also: float32
+cmd.AddOpt(&v, "v", "var", "description")
 ```
 
 Composite types
 ```go
-var v [2]int // element can be any valid basic or composite type
-argp.AddOpt(&v, "v", "var", [2]int{4, 2}, "description")
+v := [2]int{4, 2} // element can be any valid basic or composite type
+cmd.AddOpt(&v, "v", "var", "description")
 // --var [4 2]  =>  [2]int{4, 2}
 // or: --var 4,2  =>  [2]int{4, 2}
 
-var v []int // element can be any valid basic or composite type
-argp.AddOpt(&v, "v", "var", []int{4, 2, 1}, "description")
+v := []int{4, 2, 1} // element can be any valid basic or composite type
+cmd.AddOpt(&v, "v", "var", "description")
 // --var [4 2 1]  =>  []int{4, 2, 1}
 // or: --var 4,2,1  =>  []int{4, 2, 1}
 
-var v map[int]string // key and value can be any valid basic or composite type
-argp.AddOpt(&v, "v", "var", map[int]string{1:"one", 2:"two"}, "description")
+v := map[int]string{1:"one", 2:"two"} // key and value can be any valid basic or composite type
+cmd.AddOpt(&v, "v", "var", "description")
 // --var {1:one 2:two}  =>  map[int]string{1:"one", 2:"two"}
 
-var v struct {
+v := struct { // fields can be any valid basic or composite type
     S string
     I int
     B [2]bool
-} // fields can be any valid basic or composite type
-argp.AddOpt(&v, "v", "var", v{"string", 42, [2]bool{0, 1}}", "description")
+}{"string", 42, [2]bool{0, 1}}
+cmd.AddOpt(&v, "v", "var", "description")
 // --var {string 42 [0 1]}  =>  struct{S string, I int, B [2]bool}{"string", 42, false, true}
 ```
 
 Count type
 ```go
 var v int
-argp.AddOpt(Count{&v}, "v","var", 0, "description")
+cmd.AddOpt(argp.Count{&v}, "v","var", "description")
 // Count the number of times flag is present
 // -v -v / -vv / --var --var  =>  2
 // or: -v 5  =>  5
@@ -167,7 +167,7 @@ argp.AddOpt(Count{&v}, "v","var", 0, "description")
 Append type
 ```go
 var v []int
-argp.AddOpt(Append{&v}, "v","var", 0, "description")
+cmd.AddOpt(argp.Append{&v}, "v","var", "description")
 // Append values for each flag
 // -v 1 -v 2  =>  [1 2]
 ```

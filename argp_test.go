@@ -430,8 +430,8 @@ type ExampleCustom struct {
 	Num, Div float64
 }
 
-func (e *ExampleCustom) Help() (string, string, string) {
-	return fmt.Sprintf("%v/%v", e.Num, e.Div), "", ""
+func (e *ExampleCustom) Help() (string, string) {
+	return fmt.Sprintf("%v/%v", e.Num, e.Div), ""
 }
 
 func (e *ExampleCustom) Scan(name string, s []string) (int, error) {
