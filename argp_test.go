@@ -75,6 +75,7 @@ func TestArgpTypes(t *testing.T) {
 		{[]string{"--slice", "foo", ",bar"}, STypes{Slice: []string{"foo", "bar"}}},
 		{[]string{"--slice", "foo bar,zim"}, STypes{Slice: []string{"foo bar", "zim"}}},
 		{[]string{"--map", "{foo:2 bar:3}"}, STypes{Map: map[string]string{"foo": "2 bar:3"}}},
+		{[]string{"--map", "{foo:2,bar:3}"}, STypes{Map: map[string]string{"foo": "2", "bar": "3"}}},
 		{[]string{"--map", "{foo:2", "bar:3}"}, STypes{Map: map[string]string{"foo": "2", "bar": "3"}}},
 		{[]string{"--map", "{", "foo", ":", "2", "", ":", "", "}"}, STypes{Map: map[string]string{"foo": "2", "": ""}}},
 		{[]string{"--map[foo]=2", "--map[bar]=3"}, STypes{Map: map[string]string{"foo": "2", "bar": "3"}}},
@@ -401,17 +402,25 @@ func TestArgpSubCommand(t *testing.T) {
 	test.T(t, sub2.C, 3)
 }
 
-func ExampleCount() {
-	var count int
-	argp := New("count variable")
-	argp.AddOpt(Count{&count}, "c", "count", "")
-
-	_, _, err := argp.parse([]string{"-ccc"})
-	if err != nil {
-		panic(err)
+func TestSplitArguments(t *testing.T) {
+	tests := []struct {
+		str  string
+		args []string
+	}{
+		{"foobar", []string{"foobar"}},
+		{"foo bar", []string{"foo", "bar"}},
+		{"'foo bar'", []string{"foo bar"}},
+		{"'foo'\"bar\"", []string{"foobar"}},
+		{"'foo\\'bar'", []string{"foo'bar"}},
+		{"foo ' bar '", []string{"foo", " bar "}},
 	}
-	fmt.Println(count)
-	// Output: 3
+
+	for _, tt := range tests {
+		t.Run(tt.str, func(t *testing.T) {
+			args := splitArguments(tt.str)
+			test.T(t, args, tt.args)
+		})
+	}
 }
 
 func TestCount(t *testing.T) {
@@ -424,6 +433,31 @@ func TestCount(t *testing.T) {
 		test.Error(t, err)
 	}
 	test.T(t, count, 3)
+}
+
+func TestCustomVar(t *testing.T) {
+	custom := ExampleCustom{}
+	argp := New("custom variable")
+	argp.AddOpt(&custom, "", "custom", "")
+
+	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
+	if err != nil {
+		test.Error(t, err)
+	}
+	test.T(t, custom, ExampleCustom{1.0, 2.0})
+}
+
+func ExampleCount() {
+	var count int
+	argp := New("count variable")
+	argp.AddOpt(Count{&count}, "c", "count", "")
+
+	_, _, err := argp.parse([]string{"-ccc"})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(count)
+	// Output: 3
 }
 
 type ExampleCustom struct {
@@ -469,18 +503,6 @@ func (e *ExampleCustom) Scan(name string, s []string) (int, error) {
 	e.Num = fnum
 	e.Div = fdiv
 	return n + 1, nil
-}
-
-func TestCustomVar(t *testing.T) {
-	custom := ExampleCustom{}
-	argp := New("custom variable")
-	argp.AddOpt(&custom, "", "custom", "")
-
-	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
-	if err != nil {
-		test.Error(t, err)
-	}
-	test.T(t, custom, ExampleCustom{1.0, 2.0})
 }
 
 func ExampleCustomVar() {

@@ -53,21 +53,37 @@ func (config *Config) unmarshal(prefix string, values map[string]interface{}) er
 		if prefix != "" {
 			name = prefix + "." + name
 		}
-		fmt.Printf("%T %s - %T %s\n", key, key, ival, ival)
-		switch val := ival.(type) {
-		case map[string]interface{}:
+		if val, ok := ival.(map[string]interface{}); ok {
 			if err := config.unmarshal(name, val); err != nil {
 				return err
 			}
-		default:
-			if v := config.Argp.findLong(name); v != nil {
-				fmt.Println("set", name, ival)
-				vval := reflect.ValueOf(ival)
-				if !vval.CanConvert(v.Value.Type()) {
-					return fmt.Errorf("invalid type for %s, expected %v", name, v.Value.Type())
-				}
-				v.Value.Set(vval.Convert(v.Value.Type()))
+			continue
+		}
+
+		v := config.Argp.findLong(name)
+		if v == nil {
+			continue
+		}
+
+		vals := []string{}
+		switch val := ival.(type) {
+		case string:
+			vals = splitArguments(val)
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool:
+			vals = []string{fmt.Sprintf("%v", ival)}
+		case []interface{}:
+			vals = append(vals, "[")
+			for _, v := range val {
+				vals = append(vals, fmt.Sprintf("%v", v))
 			}
+			vals = append(vals, "]")
+		default:
+			return fmt.Errorf("%s: unknown type", name)
+		}
+		if n, err := scanVar(v.Value, name, vals); err != nil {
+			return fmt.Errorf("%s: %v", name, err)
+		} else if n != len(vals) {
+			return fmt.Errorf("%s: invalid value", name)
 		}
 	}
 	return nil

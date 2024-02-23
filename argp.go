@@ -1122,6 +1122,9 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 				if sVal == nil || split {
 					return 0, fmt.Errorf("map key %v: invalid value", index)
 				}
+			} else if idx := strings.IndexByte(s[0], ','); idx != -1 {
+				sVal = []string{s[0][:idx]}
+				s[0] = s[0][idx+1:]
 			} else {
 				sVal = []string{s[0]}
 				s = s[1:]
@@ -1315,20 +1318,41 @@ func toFieldname(name string) string {
 
 func splitArguments(s string) []string {
 	i := 0
+	var esc bool
+	var quote rune
+	arg := ""
 	args := []string{}
 	for j, r := range s {
-		n := utf8.RuneLen(r)
-		// TODO: support single/double strings and escapes
-		if unicode.IsSpace(r) {
+		if r == '\\' {
 			if i < j {
-				args = append(args, s[i:j])
-				j = i
+				arg += s[i:j]
 			}
-			j += n
+			i = j + 1
+			esc = true
+		} else if esc {
+			esc = false
+		} else if (quote == 0 || quote == r) && r == '\'' || r == '"' {
+			if quote == 0 {
+				quote = r
+			} else {
+				quote = 0
+			}
+			if i < j {
+				arg += s[i:j]
+			}
+			i = j + 1
+		} else if quote == 0 && unicode.IsSpace(r) {
+			if i < j {
+				args = append(args, arg+s[i:j])
+				arg = ""
+			}
+			i = j + utf8.RuneLen(r)
 		}
 	}
 	if i < len(s) {
-		args = append(args, s[i:])
+		args = append(args, arg+s[i:])
+	} else if 0 < len(arg) {
+		args = append(args, arg)
 	}
 	return args
 }
