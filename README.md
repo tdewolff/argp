@@ -155,21 +155,51 @@ cmd.AddOpt(&v, "v", "var", "description")
 // --var {string 42 [0 1]}  =>  struct{S string, I int, B [2]bool}{"string", 42, false, true}
 ```
 
-Count type
+#### Count
+Count the number of time a flag has been passed.
+
 ```go
-var v int
-cmd.AddOpt(argp.Count{&v}, "v","var", "description")
+var c int
+cmd.AddOpt(argp.Count{&c}, "c", "count", "Count")
 // Count the number of times flag is present
-// -v -v / -vv / --var --var  =>  2
-// or: -v 5  =>  5
+// -c -c / -cc / --count --count  =>  2
+// or: -c 5  =>  5
 ```
 
-Append type
+#### Append
+Append each flag to a list.
+
 ```go
 var v []int
-cmd.AddOpt(argp.Append{&v}, "v","var", "description")
+cmd.AddOpt(argp.Append{&v}, "v", "value", "Values")
 // Append values for each flag
 // -v 1 -v 2  =>  [1 2]
+```
+
+#### Config
+Load all arguments from a configuration file. Currently only TOML is supported.
+
+```go
+cmd.AddOpt(&argp.Config{cmd, "config.toml"}, "", "config", "Configuration file")
+```
+
+#### Table
+Use a table source specified as type:table. Supported types are: static, inline, sqlite, mysql.
+- Static takes a string and will return that as a value for all keys, e.g. `static:foobar`
+- Inline takes a map[string]string, e.g. `inline:{foo:1 bar:2}`
+- SQLite takes a filepath to a configuration file, e.g. `sqlite:/path/to/config.toml`, with the following fields:
+  - Path: filepath to the SQLite database
+  - Query: SELECT query where `?` is replaced by the key
+- MySQL take a filepath to a configuration file, e.g. `mysql:/path/to/config.toml`, with the following fields:
+  - Host: database host
+  - User: database user
+  - Password: database password
+  - Dbname: database name
+  - Query: SELECT query where `?` is replaced by the key
+
+```go
+table := argp.Table{[]string{"static:value"}}
+cmd.AddOpt(&table, "", "table", "Table")
 ```
 
 ### Option tags

@@ -270,7 +270,7 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, description string
 }
 
 // AddVal adds an indexed value
-func (argp *Argp) AddVal(dst interface{}, description string) {
+func (argp *Argp) AddVal(dst interface{}, name, description string) {
 	v := reflect.ValueOf(dst)
 	_, isCustom := dst.(Custom)
 	if !isCustom && v.Type().Kind() != reflect.Ptr {
@@ -281,6 +281,7 @@ func (argp *Argp) AddVal(dst interface{}, description string) {
 
 	variable := &Var{}
 	variable.Value = v
+	variable.Name = strings.ToLower(name)
 	variable.Index = 0
 	if !isValidType(v.Type()) {
 		panic(fmt.Sprintf("unsupported type %s", v.Type()))
@@ -354,7 +355,11 @@ func appendStructHelps(helps []optionHelp, name string, v reflect.Value) []optio
 			helps = appendStructHelps(helps, long, v.Field(i))
 		} else {
 			if deflt := v.Field(i); !deflt.IsZero() {
-				long += fmt.Sprintf("=%v", deflt)
+				val := fmt.Sprintf("%v", deflt)
+				if space := strings.IndexByte(val, ' '); space != -1 {
+					val = "'" + val + "'"
+				}
+				long += "=" + val
 			}
 			typ := TypeName(field.Type)
 			desc := field.Tag.Get("desc")
@@ -391,10 +396,13 @@ func getOptionHelps(vs []*Var) []optionHelp {
 		}
 		long = v.Long
 		if val != "" {
+			if space := strings.IndexByte(val, ' '); space != -1 {
+				val = "'" + val + "'"
+			}
 			if long != "" {
-				long += fmt.Sprintf("=%v", val)
+				long += "=" + val
 			} else {
-				short += fmt.Sprintf("=%v", val)
+				short += "=" + val
 			}
 		}
 		helps = append(helps, optionHelp{
@@ -441,7 +449,7 @@ func (argp *Argp) PrintHelp() {
 	if 0 < len(arguments) {
 		for _, v := range arguments {
 			if !v.Rest {
-				args += " [" + v.Long + "]"
+				args += " " + v.Name
 			}
 		}
 		if rest := argp.findRest(); rest != nil {
@@ -553,7 +561,7 @@ func (argp *Argp) PrintHelp() {
 	if 0 < len(arguments) {
 		fmt.Printf("\nArguments:\n")
 		nMax := 0
-		for _, v := range options {
+		for _, v := range arguments {
 			n := 2 + len(v.Name)
 			if nMax < n {
 				nMax = n
@@ -883,6 +891,8 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 }
 
 // truncEnd splits the arguments and returns values for an array/slice/map/struct and remaining
+// the first value is nil when either brackets don't match or closing brackets are missing
+// the last return value indicates if the closing bracket was in the middle of an item (bad syntax)
 func truncEnd(s []string) ([]string, []string, bool) {
 	if len(s) == 0 {
 		return []string{}, s, false
@@ -892,15 +902,15 @@ func truncEnd(s []string) ([]string, []string, bool) {
 		for i := 0; i < len(item); i++ {
 			switch item[i] {
 			case '{', '[':
-				levels = append(levels, item[i]+2)
+				levels = append(levels, item[i]+2) // + 2 to get the closing bracket
 			case '}', ']':
 				if len(levels) == 0 || levels[len(levels)-1] != item[i] {
-					return nil, s, false // opening/closing brackets don't match, or too many closing
+					return nil, s, false // open/close brackets don't match, or too many closes
 				} else if len(levels) == 1 {
 					if i+1 == len(item) {
 						return s[:n+1], s[n+1:], false
 					}
-					// split
+					// split last item
 					k := s[n:]
 					s = append(s[:n:n], s[n][:i+1])
 					k[0] = k[0][i+1:]
@@ -909,6 +919,10 @@ func truncEnd(s []string) ([]string, []string, bool) {
 				levels = levels[:len(levels)-1]
 			}
 		}
+	}
+	if len(levels) == 0 {
+		// there were no brackets to begin with
+		return s[:1], s[1:], false
 	}
 	return nil, s, false // no closing bracket found
 }
@@ -1011,7 +1025,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 					return 0, fmt.Errorf("%v index %v: invalid value", typ, j)
 				}
 				sVal, s, split = truncEnd(s)
-				if split {
+				if sVal == nil || split {
 					return 0, fmt.Errorf("%v index %v: invalid value", typ, j)
 				}
 			} else if idx := strings.IndexByte(s[0], ','); idx != -1 && comma {
@@ -1062,8 +1076,10 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 			// consume key
 			var sKey []string
 			if 0 < len(s[0]) && (s[0][0] == '{' || s[0][0] == '[') {
-				sKey, s, _ = truncEnd(s)
-				if len(s) == 0 || len(s[0]) == 0 || s[0][0] != ':' {
+				sKey, s, split = truncEnd(s)
+				if sKey == nil {
+					return 0, fmt.Errorf("invalid map key")
+				} else if len(s) == 0 || len(s[0]) == 0 || s[0][0] != ':' {
 					return 0, fmt.Errorf("map key %v: missing semicolon", strings.Join(sKey, " "))
 				}
 				if len(s[0]) == 1 {
@@ -1103,7 +1119,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 				sVal = []string{""}
 			} else if 0 < len(s[0]) && (s[0][0] == '{' || s[0][0] == '[') {
 				sVal, s, split = truncEnd(s)
-				if split {
+				if sVal == nil || split {
 					return 0, fmt.Errorf("map key %v: invalid value", index)
 				}
 			} else {
@@ -1152,7 +1168,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 			var sVal []string
 			if s[0][0] == '{' || s[0][0] == '[' {
 				sVal, s, split = truncEnd(s)
-				if split {
+				if sVal == nil || split {
 					return 0, fmt.Errorf("struct field %v: invalid value", field)
 				}
 			} else {
@@ -1264,15 +1280,18 @@ func sortArgument(vars []*Var) func(int, int) bool {
 
 func fromFieldname(field string) string {
 	name := make([]byte, 0, len(field))
+	prevUpper := false
 	for i, r := range field {
 		if unicode.IsTitle(r) || unicode.IsUpper(r) {
 			rNext, n := utf8.DecodeRuneInString(field[i+utf8.RuneLen(r):])
-			if i != 0 && n != 0 && !unicode.IsTitle(rNext) && !unicode.IsUpper(rNext) {
+			if i != 0 && n != 0 && (!prevUpper || !unicode.IsTitle(rNext) && !unicode.IsUpper(rNext)) {
 				name = append(name, '-')
 			}
 			name = utf8.AppendRune(name, unicode.ToLower(r))
+			prevUpper = true
 		} else {
 			name = utf8.AppendRune(name, r)
+			prevUpper = false
 		}
 	}
 	return string(name)

@@ -230,12 +230,12 @@ func TestArgpErrors(t *testing.T) {
 	var cmd *Argp
 
 	cmd = New("description")
-	cmd.AddVal(&[]int{}, "")
+	cmd.AddVal(&[]int{}, "", "")
 	_, _, err = cmd.parse([]string{"5,s"})
 	test.T(t, err, fmt.Errorf("argument 0: slice index 1: invalid integer 's'"))
 
 	cmd = New("description")
-	cmd.AddVal(&map[int]int{}, "")
+	cmd.AddVal(&map[int]int{}, "", "")
 	_, _, err = cmd.parse([]string{"{s:5}"})
 	test.T(t, err, fmt.Errorf("argument 0: map key s: invalid integer 's'"))
 	_, _, err = cmd.parse([]string{"{5:s}"})
@@ -303,7 +303,7 @@ func TestArgpAdd(t *testing.T) {
 	var v bool
 	argp := New("description")
 	argp.AddOpt(&o, "", "long", "description")
-	argp.AddVal(&v, "description")
+	argp.AddVal(&v, "", "description")
 
 	_, _, err := argp.parse([]string{"--long", "8", "true"})
 	test.Error(t, err)
@@ -382,7 +382,7 @@ func TestArgpSubCommand(t *testing.T) {
 	sub1 := SSub1{}
 	sub2 := SSub2{}
 	argp := New("description")
-	argp.AddVal(&v, "description")
+	argp.AddVal(&v, "", "description")
 	argp.AddOpt(&a, "a", "", "description")
 	argp.AddCmd(&sub1, "one", "description")
 	argp.AddCmd(&sub2, "two", "description")
