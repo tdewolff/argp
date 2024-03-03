@@ -68,7 +68,11 @@ func (config *Config) unmarshal(prefix string, values map[string]interface{}) er
 		vals := []string{}
 		switch val := ival.(type) {
 		case string:
-			vals = splitArguments(val)
+			if val[0] == '[' || val[0] == '{' {
+				vals = splitArguments(val)
+			} else {
+				vals = []string{val}
+			}
 		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool:
 			vals = []string{fmt.Sprintf("%v", ival)}
 		case []interface{}:

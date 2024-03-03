@@ -737,25 +737,23 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 					if v == nil {
 						return argp, nil, fmt.Errorf("unknown option -%c", name)
 					} else {
-						s := args[i+1:]
+						s := append([]string{arg[j:]}, args[i+1:]...)
 						hasEquals := j < len(arg) && arg[j] == '='
 						if hasEquals {
-							if j+1 < len(arg) {
-								s = append([]string{arg[j+1:]}, args[i+1:]...)
-							}
-							j++
-						} else if j < len(arg) {
-							s = append([]string{arg[j:]}, args[i+1:]...)
+							s[0] = s[0][1:]
 						}
-
+						valueGlued := 0 < len(s[0])
+						if !valueGlued {
+							s = s[1:]
+						}
 						n, err := scanVar(v.Value, string(name), s)
 						if err != nil {
 							return argp, nil, fmt.Errorf("option -%c: %v", name, err)
 						} else if n == 0 {
 							continue // can be of the form -abc
 						}
-						if hasEquals {
-							i--
+						if valueGlued {
+							n--
 						}
 						i += n
 						break
