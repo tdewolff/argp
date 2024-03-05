@@ -20,7 +20,6 @@ var ShowUsage error = fmt.Errorf("bad command usage")
 type Var struct {
 	Value       reflect.Value
 	Name        string
-	Long        string
 	Short       rune // 0 if not used
 	Index       int  // -1 if not used
 	Rest        bool
@@ -100,62 +99,60 @@ func NewCmd(cmd Cmd, description string) *Argp {
 				variable.Value = vfield
 				variable.Name = fromFieldname(tfield.Name)
 				variable.Index = -1
+				option := reflect.TypeOf(cmd).String() + "." + tfield.Name
 
 				if !isValidType(vfield.Type()) {
 					panic(fmt.Sprintf("unsupported type %s", vfield.Type()))
 				}
 
-				name := tfield.Tag.Get("name")
-				long, hasLong := tfield.Tag.Lookup("long")
+				name, hasName := tfield.Tag.Lookup("name")
 				short := tfield.Tag.Get("short")
 				index := tfield.Tag.Get("index")
 				def, hasDef := tfield.Tag.Lookup("default")
 				description := tfield.Tag.Get("desc")
 
-				if name != "" {
-					variable.Name = name
+				if hasName {
+					variable.Name = strings.ToLower(name)
 				}
-				if !hasLong {
-					variable.Long = variable.Name
-				} else if long != "" {
-					if !isValidName(long) {
-						panic(fmt.Sprintf("option %v: invalid long option name: --%v", variable.Name, long))
-					} else if argp.findLong(long) != nil {
-						panic(fmt.Sprintf("option %v: long option name already exists: --%v", variable.Name, long))
-					}
-					variable.Long = strings.ToLower(long)
+				if variable.Name == "" {
+					variable.Name = short
+				}
+				if !isValidName(variable.Name) {
+					panic(fmt.Sprintf("%v: invalid option name: --%v", option, variable.Name))
+				} else if argp.findName(variable.Name) != nil {
+					panic(fmt.Sprintf("%v: option name already exists: --%v", option, variable.Name))
 				}
 				if short != "" {
 					if !isValidName(short) {
-						panic(fmt.Sprintf("option %v: invalid short option name: --%v", variable.Name, short))
+						panic(fmt.Sprintf("%v: invalid short option name: --%v", option, short))
 					}
 					r, n := utf8.DecodeRuneInString(short)
 					if len(short) != n || n == 0 {
-						panic(fmt.Sprintf("option %v: short option name must be one character: -%v", variable.Name, short))
+						panic(fmt.Sprintf("%v: short option name must be one character: -%v", option, short))
 					} else if argp.findShort(r) != nil {
-						panic(fmt.Sprintf("option %v: short option name already exists: -%v", variable.Name, string(r)))
+						panic(fmt.Sprintf("%v: short option name already exists: -%v", option, string(r)))
 					}
 					variable.Short = r
 				}
 				if index != "" {
-					if long != "" || short != "" {
-						panic(fmt.Sprintf("option %v: can not set both an option name and index", variable.Name))
+					if short != "" {
+						panic(fmt.Sprintf("%v: can not set both an option short name and index", option))
 					}
 					if index == "*" {
 						if argp.findRest() != nil {
-							panic(fmt.Sprintf("option %v: rest option already exists", variable.Name))
+							panic(fmt.Sprintf("%v: rest option already exists", option))
 						} else if def != "" {
-							panic(fmt.Sprintf("option %v: rest option can not have a default value", variable.Name))
+							panic(fmt.Sprintf("%v: rest option can not have a default value", option))
 						} else if variable.Value.Kind() != reflect.Slice || variable.Value.Type().Elem().Kind() != reflect.String {
-							panic(fmt.Sprintf("option %v: rest option must be of type []string", variable.Name))
+							panic(fmt.Sprintf("%v: rest option must be of type []string", option))
 						}
 						variable.Rest = true
 					} else {
 						i, err := strconv.Atoi(index)
 						if err != nil || i < 0 {
-							panic(fmt.Sprintf("option %v: index must be a non-negative integer or *", variable.Name))
+							panic(fmt.Sprintf("%v: index must be a non-negative integer or *", option))
 						} else if argp.findIndex(i) != nil {
-							panic(fmt.Sprintf("option %v: option index already exists: %v", variable.Name, i))
+							panic(fmt.Sprintf("%v: option index already exists: %v", option, i))
 						}
 						variable.Index = i
 						if maxIndex < i {
@@ -166,7 +163,7 @@ func NewCmd(cmd Cmd, description string) *Argp {
 				if hasDef {
 					defVal := reflect.New(vfield.Type()).Elem()
 					if _, err := scanVar(defVal, "", splitArguments(def)); err != nil {
-						panic(fmt.Sprintf("option %v: bad default value: %v", variable.Name, err))
+						panic(fmt.Sprintf("%v: bad default value: %v", option, err))
 					}
 					variable.Default = defVal.Interface()
 				}
@@ -189,7 +186,7 @@ func NewCmd(cmd Cmd, description string) *Argp {
 			}
 		}
 	}
-	if argp.findLong("help") == nil {
+	if argp.findName("help") == nil {
 		if argp.findShort('h') == nil {
 			argp.AddOpt(&argp.help, "h", "help", "Help")
 		} else {
@@ -223,7 +220,7 @@ func (argp *Argp) IsSet(name string) bool {
 }
 
 // AddOpt adds an option
-func (argp *Argp) AddOpt(dst interface{}, short, long string, description string) {
+func (argp *Argp) AddOpt(dst interface{}, short, name string, description string) {
 	v := reflect.ValueOf(dst)
 	_, isCustom := dst.(Custom)
 	if !isCustom && v.Type().Kind() != reflect.Ptr {
@@ -238,18 +235,19 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, description string
 
 	if !isValidType(v.Type()) {
 		panic(fmt.Sprintf("unsupported type %s", v.Type()))
-	} else if short == "" && long == "" {
-		panic("must set short or long variable name")
+	} else if name == "" {
+		name = short
+		if name == "" {
+			panic("must set option name")
+		}
 	}
 
-	if long != "" {
-		if !isValidName(long) {
-			panic(fmt.Sprintf("invalid long option name: --%v", long))
-		} else if argp.findLong(long) != nil {
-			panic(fmt.Sprintf("long option name already exists: --%v", long))
-		}
-		variable.Long = strings.ToLower(long)
+	if !isValidName(name) {
+		panic(fmt.Sprintf("invalid option name: --%v", name))
+	} else if argp.findName(name) != nil {
+		panic(fmt.Sprintf("option name already exists: --%v", name))
 	}
+	variable.Name = strings.ToLower(name)
 	if short != "" {
 		if !isValidName(short) {
 			panic(fmt.Sprintf("invalid short option name: -%v", short))
@@ -269,8 +267,8 @@ func (argp *Argp) AddOpt(dst interface{}, short, long string, description string
 	argp.vars = append(argp.vars, variable)
 }
 
-// AddVal adds an indexed value
-func (argp *Argp) AddVal(dst interface{}, name, description string) {
+// AddArg adds an indexed value
+func (argp *Argp) AddArg(dst interface{}, name, description string) {
 	v := reflect.ValueOf(dst)
 	_, isCustom := dst.(Custom)
 	if !isCustom && v.Type().Kind() != reflect.Ptr {
@@ -291,9 +289,6 @@ func (argp *Argp) AddVal(dst interface{}, name, description string) {
 		if variable.Index <= v.Index {
 			variable.Index = v.Index + 1
 		}
-	}
-	if !isCustom {
-		variable.Default = v.Interface()
 	}
 	variable.Description = description
 	argp.vars = append(argp.vars, variable)
@@ -339,33 +334,35 @@ func wrapString(s string, cols int) (string, string) {
 }
 
 type optionHelp struct {
-	short, long, typ, desc string
+	short, name, typ, desc string
 }
 
-func appendStructHelps(helps []optionHelp, name string, v reflect.Value) []optionHelp {
+func appendStructHelps(helps []optionHelp, root string, v reflect.Value) []optionHelp {
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Type().Field(i)
-		long := name + "."
-		if name := field.Tag.Get("name"); name != "" {
-			long += name
+		name := root + "."
+		if tagName := field.Tag.Get("name"); tagName != "" {
+			name += tagName
+		} else if tagShort := field.Tag.Get("short"); tagShort != "" {
+			name += tagShort
 		} else {
-			long += fromFieldname(field.Name)
+			name += fromFieldname(field.Name)
 		}
 		if field.Type.Kind() == reflect.Struct {
-			helps = appendStructHelps(helps, long, v.Field(i))
+			helps = appendStructHelps(helps, name, v.Field(i))
 		} else {
 			if deflt := v.Field(i); !deflt.IsZero() {
 				val := fmt.Sprintf("%v", deflt)
 				if space := strings.IndexByte(val, ' '); space != -1 {
 					val = "'" + val + "'"
 				}
-				long += "=" + val
+				name += "=" + val
 			}
 			typ := TypeName(field.Type)
 			desc := field.Tag.Get("desc")
 			helps = append(helps, optionHelp{
 				short: "",
-				long:  long,
+				name:  name,
 				typ:   typ,
 				desc:  desc,
 			})
@@ -381,7 +378,7 @@ func getOptionHelps(vs []*Var) []optionHelp {
 		if custom, ok := v.Value.Interface().(Custom); ok {
 			val, typ = custom.Help()
 		} else if v.Value.Kind() == reflect.Struct {
-			helps = appendStructHelps(helps, v.Long, v.Value)
+			helps = appendStructHelps(helps, v.Name, v.Value)
 			continue
 		} else {
 			if v.Default != nil && !reflect.ValueOf(v.Default).IsZero() {
@@ -390,24 +387,24 @@ func getOptionHelps(vs []*Var) []optionHelp {
 			typ = TypeName(v.Value.Type())
 		}
 
-		var short, long string
+		var short, name string
 		if v.Short != 0 {
 			short = string(v.Short)
 		}
-		long = v.Long
+		name = v.Name
 		if val != "" {
 			if space := strings.IndexByte(val, ' '); space != -1 {
 				val = "'" + val + "'"
 			}
-			if long != "" {
-				long += "=" + val
+			if name != "" {
+				name += "=" + val
 			} else {
 				short += "=" + val
 			}
 		}
 		helps = append(helps, optionHelp{
 			short: short,
-			long:  long,
+			name:  name,
 			typ:   typ,
 			desc:  v.Description,
 		})
@@ -469,11 +466,11 @@ func (argp *Argp) PrintHelp() {
 			n := 0
 			if o.short != "" {
 				n += 4
-				if o.long != "" {
-					n += 4 + len(o.long)
+				if o.name != "" {
+					n += 4 + len(o.name)
 				}
-			} else if o.long != "" {
-				n += 8 + len(o.long)
+			} else if o.name != "" {
+				n += 8 + len(o.name)
 			}
 			if o.typ != "" {
 				n += 1 + len(o.typ)
@@ -491,15 +488,11 @@ func (argp *Argp) PrintHelp() {
 		for _, o := range optionHelps {
 			n := 0
 			if o.short != "" {
-				fmt.Printf("  -%s", o.short)
-				n += 4
-				if o.long != "" {
-					fmt.Printf(", --%s", o.long)
-					n += 4 + len(o.long)
-				}
-			} else if o.long != "" {
-				fmt.Printf("      --%s", o.long)
-				n += 8 + len(o.long)
+				fmt.Printf("  -%s, --%s", o.short, o.name)
+				n += 8 + len(o.name)
+			} else if o.name != "" {
+				fmt.Printf("      --%s", o.name)
+				n += 8 + len(o.name)
 			}
 			if o.typ != "" {
 				fmt.Printf(" %s", o.typ)
@@ -618,23 +611,6 @@ func (argp *Argp) Parse() {
 	}
 }
 
-func (argp *Argp) findName(name string) *Var {
-	if name == "" {
-		return nil
-	}
-	for _, v := range argp.vars {
-		if v.Name == name || v.Long == name {
-			return v
-		} else if v.Short != 0 && utf8.RuneCountInString(name) == 1 {
-			r, _ := utf8.DecodeRuneInString(name)
-			if r == v.Short {
-				return v
-			}
-		}
-	}
-	return nil
-}
-
 func (argp *Argp) findShort(short rune) *Var {
 	for _, v := range argp.vars {
 		if v.Short != 0 && v.Short == short {
@@ -644,13 +620,16 @@ func (argp *Argp) findShort(short rune) *Var {
 	return nil
 }
 
-func (argp *Argp) findLong(long string) *Var {
-	long = strings.ToLower(long)
-	if i := strings.IndexAny(long, ".["); i != -1 {
-		long = long[:i]
+func (argp *Argp) findName(name string) *Var {
+	if name == "" {
+		return nil
+	}
+	name = strings.ToLower(name)
+	if i := strings.IndexAny(name, ".["); i != -1 {
+		name = name[:i]
 	}
 	for _, v := range argp.vars {
-		if v.Long != "" && v.Long == long {
+		if v.Name == name || v.Name == "" && string(v.Short) == name {
 			return v
 		}
 	}
@@ -714,7 +693,7 @@ func (argp *Argp) parse(args []string) (*Argp, []string, error) {
 					}
 				}
 
-				v := argp.findLong(name)
+				v := argp.findName(name)
 				if v == nil {
 					return argp, nil, fmt.Errorf("unknown option --%s", name)
 				}
@@ -860,7 +839,7 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 			t := v.Type()
 			found := false
 			for i := 0; i < t.NumField(); i++ {
-				if t.Field(i).Tag.Get("name") == name || fromFieldname(t.Field(i).Name) == name {
+				if t.Field(i).Tag.Get("name") == name || t.Field(i).Tag.Get("short") == name || fromFieldname(t.Field(i).Name) == name {
 					name = t.Field(i).Name
 					found = true
 					break
@@ -971,7 +950,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 
 		var split, comma bool
 		if len(s[0]) == 0 {
-			return 0, fmt.Errorf("missing %v value", typ)
+			return 1, nil
 		} else if s[0][0] != '[' {
 			comma = true
 		} else if s, _, split = truncEnd(s); s == nil || split {
@@ -1053,8 +1032,10 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 		}
 	case reflect.Map:
 		var split bool
-		if len(s[0]) == 0 || s[0][0] != '{' {
-			return 0, fmt.Errorf("missing map value")
+		if len(s[0]) == 0 {
+			return 1, nil
+		} else if s[0][0] != '{' {
+			return 0, fmt.Errorf("invalid map")
 		} else if s, _, split = truncEnd(s); s == nil || split {
 			return 0, fmt.Errorf("invalid map")
 		}
@@ -1139,8 +1120,10 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 		}
 	case reflect.Struct:
 		var split bool
-		if len(s[0]) == 0 || s[0][0] != '{' {
-			return 0, fmt.Errorf("missing struct value")
+		if len(s[0]) == 0 {
+			return 1, nil
+		} else if s[0][0] != '{' {
+			return 0, fmt.Errorf("invalid struct")
 		} else if s, _, split = truncEnd(s); s == nil || split {
 			return 0, fmt.Errorf("invalid struct")
 		}
@@ -1251,19 +1234,19 @@ func TypeName(t reflect.Type) string {
 	return ""
 }
 
-// sortOption sorts options by short and then long name.
+// sortOption sorts options by short and then name.
 func sortOption(vars []*Var) func(int, int) bool {
 	return func(i, j int) bool {
 		if vars[i].Short != 0 {
 			if vars[j].Short != 0 {
 				return vars[i].Short < vars[j].Short
 			} else {
-				return string(vars[i].Short) < vars[j].Long
+				return string(vars[i].Short) < vars[j].Name
 			}
 		} else if vars[j].Short != 0 {
-			return vars[i].Long < string(vars[j].Short)
+			return vars[i].Name < string(vars[j].Short)
 		}
-		return vars[i].Long < vars[j].Long
+		return vars[i].Name < vars[j].Name
 	}
 }
 
@@ -1349,7 +1332,7 @@ func splitArguments(s string) []string {
 	}
 	if i < len(s) {
 		args = append(args, arg+s[i:])
-	} else if 0 < len(arg) {
+	} else {
 		args = append(args, arg)
 	}
 	return args

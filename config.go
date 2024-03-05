@@ -60,7 +60,7 @@ func (config *Config) unmarshal(prefix string, values map[string]interface{}) er
 			continue
 		}
 
-		v := config.Argp.findLong(name)
+		v := config.Argp.findName(name)
 		if v == nil {
 			continue
 		}

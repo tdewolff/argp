@@ -231,12 +231,12 @@ func TestArgpErrors(t *testing.T) {
 	var cmd *Argp
 
 	cmd = New("description")
-	cmd.AddVal(&[]int{}, "", "")
+	cmd.AddArg(&[]int{}, "", "")
 	_, _, err = cmd.parse([]string{"5,s"})
 	test.T(t, err, fmt.Errorf("argument 0: slice index 1: invalid integer 's'"))
 
 	cmd = New("description")
-	cmd.AddVal(&map[int]int{}, "", "")
+	cmd.AddArg(&map[int]int{}, "", "")
 	_, _, err = cmd.parse([]string{"{s:5}"})
 	test.T(t, err, fmt.Errorf("argument 0: map key s: invalid integer 's'"))
 	_, _, err = cmd.parse([]string{"{5:s}"})
@@ -250,12 +250,12 @@ func TestArgpErrors(t *testing.T) {
 
 type SOptions struct {
 	Foo  string `short:"f"`
-	Bar  string `long:"barbar"`
+	Bar  string `name:"barbar"`
 	Baz  string `default:"default"`
 	A    bool   `short:"a"`
 	B    bool   `short:"b"`
 	C    int    `short:"c"`
-	Name string `long:"N-a_më"`
+	Name string `name:"N-a_më"`
 }
 
 func (_ *SOptions) Run() error {
@@ -303,18 +303,16 @@ func TestArgpAdd(t *testing.T) {
 	o := int64(4)
 	var v bool
 	argp := New("description")
-	argp.AddOpt(&o, "", "long", "description")
-	argp.AddVal(&v, "", "description")
+	argp.AddOpt(&o, "", "name", "description")
+	argp.AddArg(&v, "", "description")
 
-	_, _, err := argp.parse([]string{"--long", "8", "true"})
+	_, _, err := argp.parse([]string{"--name", "8", "true"})
 	test.Error(t, err)
 	test.T(t, o, int64(8))
 	test.T(t, v, true)
 
 	_, _, err = argp.parse([]string{})
-	test.Error(t, err)
-	test.T(t, o, int64(4))
-	test.T(t, v, false)
+	test.T(t, err.Error(), "argument 0 is missing")
 }
 
 func TestArgpUTF8(t *testing.T) {
@@ -383,7 +381,7 @@ func TestArgpSubCommand(t *testing.T) {
 	sub1 := SSub1{}
 	sub2 := SSub2{}
 	argp := New("description")
-	argp.AddVal(&v, "", "description")
+	argp.AddArg(&v, "", "description")
 	argp.AddOpt(&a, "a", "", "description")
 	argp.AddCmd(&sub1, "one", "description")
 	argp.AddCmd(&sub2, "two", "description")

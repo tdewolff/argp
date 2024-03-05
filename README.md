@@ -54,13 +54,14 @@ import "github.com/tdewolff/argp"
 func main() {
     var verbose bool
     var output string
-    var size int
+    size := 512 // default value
 
     argp := argp.New("CLI tool description")
-    argp.AddOpt(&verbose, "v", "verbose", nil, "")
-    argp.AddOpt(&output, "o", "output", nil, "Output file name")
-    argp.AddOpt(&size, "", "size", 512, "Image size")
-    inputs := argp.Parse()
+    argp.AddOpt(argp.Count{&verbose}, "v", "verbose", "Increase verbosity, eg. -vvv")
+    argp.AddOpt(&output, "o", "output", "Output file name")
+    argp.AddOpt(&size, "", "size", "Image size")
+    argp.AddArg(&input, "input", "Input file name size")
+    argp.Parse()
 
     // ...
 }
@@ -101,7 +102,7 @@ func (cmd *Main) Run() error {
 }
 
 type Command struct {
-    Verbose bool `short:"v" long:""`
+    Verbose bool `short:"v" name:""`
     Output string `short:"o" desc:"Output file name"`
     Size int `default:"512" desc:"Image size"`
 }
@@ -210,7 +211,7 @@ The following struct will accept the following options and arguments:
 
 ```go
 type Command struct {
-    Var1 int `short:"v" long:"var" default:"42" desc:"Description"`
+    Var1 int `short:"v" name:"var" default:"42" desc:"Description"`
     Var2 float64 `name:"first" index:"0" default:"4.2"`
     Var3 []string `name:"rest" index:"*"`
 }
