@@ -166,6 +166,8 @@ func NewCmd(cmd Cmd, description string) *Argp {
 						panic(fmt.Sprintf("%v: bad default value: %v", option, err))
 					}
 					variable.Default = defVal.Interface()
+				} else if variable.Index != -1 {
+					variable.Default = vfield.Interface()
 				}
 				if description != "" {
 					variable.Description = description
