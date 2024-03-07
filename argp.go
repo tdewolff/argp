@@ -290,6 +290,9 @@ func (argp *Argp) AddArg(dst interface{}, name, description string) {
 			variable.Index = v.Index + 1
 		}
 	}
+	if !isCustom {
+		variable.Default = v.Interface()
+	}
 	variable.Description = description
 	argp.vars = append(argp.vars, variable)
 }
