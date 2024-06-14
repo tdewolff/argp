@@ -977,6 +977,9 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 
 		j := 0
 		slice := reflect.Zero(reflect.SliceOf(v.Type().Elem()))
+		if v.Kind() == reflect.Slice {
+			slice = reflect.Value(v)
+		}
 		for {
 			if j != 0 && comma {
 				// consume comma
