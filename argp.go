@@ -911,6 +911,10 @@ func truncEnd(s []string) ([]string, []string, bool) {
 
 func scanValue(v reflect.Value, s []string) (int, error) {
 	if len(s) == 0 {
+		if v.Kind() == reflect.String {
+			v.SetString("")
+			return 0, nil
+		}
 		return 0, fmt.Errorf("missing value")
 	}
 
