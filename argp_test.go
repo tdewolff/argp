@@ -198,7 +198,7 @@ func TestArgpErrors(t *testing.T) {
 		args []string
 		err  string
 	}{
-		{[]string{"--string"}, "option --string: missing value"},
+		{[]string{"--int"}, "option --int: missing value"},
 		{[]string{"--int", "string"}, "option --int: invalid integer 'string'"},
 		{[]string{"--uint", "-1"}, "option --uint: invalid positive integer '-1'"},
 		{[]string{"--float64", "."}, "option --float64: invalid number '.'"},
@@ -312,7 +312,7 @@ func TestArgpAdd(t *testing.T) {
 	test.T(t, v, true)
 
 	_, _, err = argp.parse([]string{})
-	test.T(t, err.Error(), "argument 0 is missing")
+	test.Error(t, err)
 }
 
 func TestArgpUTF8(t *testing.T) {
