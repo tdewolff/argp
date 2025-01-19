@@ -458,15 +458,15 @@ func ExampleCount() {
 	// Output: 3
 }
 
-type ExampleCustom struct {
+type Custom struct {
 	Num, Div float64
 }
 
-func (e *ExampleCustom) Help() (string, string) {
+func (e *Custom) Help() (string, string) {
 	return fmt.Sprintf("%v/%v", e.Num, e.Div), ""
 }
 
-func (e *ExampleCustom) Scan(name string, s []string) (int, error) {
+func (e *Custom) Scan(name string, s []string) (int, error) {
 	n := 0
 	num := s[0]
 	if idx := strings.IndexByte(s[0], '/'); idx != -1 {
@@ -503,8 +503,8 @@ func (e *ExampleCustom) Scan(name string, s []string) (int, error) {
 	return n + 1, nil
 }
 
-func ExampleCustomVar() {
-	custom := ExampleCustom{}
+func ExampleCustom() {
+	custom := Custom{}
 	argp := New("custom variable")
 	argp.AddOpt(&custom, "", "custom", "")
 

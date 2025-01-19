@@ -519,7 +519,7 @@ func (argp *Argp) PrintHelp() {
 					if len(o.desc) == 0 {
 						break
 					}
-					fmt.Printf(strings.Repeat(" ", n))
+					fmt.Print(strings.Repeat(" ", n))
 				}
 			} else {
 				fmt.Printf("\n")
