@@ -433,18 +433,6 @@ func TestCount(t *testing.T) {
 	test.T(t, count, 3)
 }
 
-func TestCustomVar(t *testing.T) {
-	custom := ExampleCustom{}
-	argp := New("custom variable")
-	argp.AddOpt(&custom, "", "custom", "")
-
-	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
-	if err != nil {
-		test.Error(t, err)
-	}
-	test.T(t, custom, ExampleCustom{1.0, 2.0})
-}
-
 func ExampleCount() {
 	var count int
 	argp := New("count variable")
@@ -458,15 +446,15 @@ func ExampleCount() {
 	// Output: 3
 }
 
-type Custom struct {
+type CustomVar struct {
 	Num, Div float64
 }
 
-func (e *Custom) Help() (string, string) {
+func (e *CustomVar) Help() (string, string) {
 	return fmt.Sprintf("%v/%v", e.Num, e.Div), ""
 }
 
-func (e *Custom) Scan(name string, s []string) (int, error) {
+func (e *CustomVar) Scan(name string, s []string) (int, error) {
 	n := 0
 	num := s[0]
 	if idx := strings.IndexByte(s[0], '/'); idx != -1 {
@@ -503,8 +491,20 @@ func (e *Custom) Scan(name string, s []string) (int, error) {
 	return n + 1, nil
 }
 
+func TestCustom(t *testing.T) {
+	custom := CustomVar{}
+	argp := New("custom variable")
+	argp.AddOpt(&custom, "", "custom", "")
+
+	_, _, err := argp.parse([]string{"--custom", "1", "/", "2"})
+	if err != nil {
+		test.Error(t, err)
+	}
+	test.T(t, custom, CustomVar{1.0, 2.0})
+}
+
 func ExampleCustom() {
-	custom := Custom{}
+	custom := CustomVar{}
 	argp := New("custom variable")
 	argp.AddOpt(&custom, "", "custom", "")
 
