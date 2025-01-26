@@ -184,24 +184,64 @@ Load all arguments from a configuration file. Currently only TOML is supported.
 cmd.AddOpt(&argp.Config{cmd, "config.toml"}, "", "config", "Configuration file")
 ```
 
-#### Table
-Use a table source specified as type:table. Supported types are: static, inline, sqlite, mysql.
-- Static takes a string and will return that as a value for all keys, e.g. `static:foobar`
-- Inline takes a map[string]string, e.g. `inline:{foo:1 bar:2}`
-- SQLite takes a filepath to a configuration file, e.g. `sqlite:/path/to/config.toml`, with the following fields:
-  - Path: filepath to the SQLite database
-  - Query: SELECT query where `?` is replaced by the key
-- MySQL take a filepath to a configuration file, e.g. `mysql:/path/to/config.toml`, with the following fields:
-  - Host: database host
-  - User: database user
-  - Password: database password
-  - Dbname: database name
-  - Query: SELECT query where `?` is replaced by the key
+#### List
+Use a list source specified as type:list. Default supported types are: inline.
+- Inline takes a []string, e.g. `inline:[foo bar]`
 
 ```go
-table := argp.Table{[]string{"static:value"}}
-cmd.AddOpt(&table, "", "table", "Table")
+list := argp.NewList(il)
+cmd.AddOpt(&list, "", "list", "List")
 ```
+
+You can add a MySQL source:
+```
+type mysqlList struct {
+	Hosts    string
+	User     string
+	Password string
+	Dbname   string
+	Query    string
+}
+
+func newMySQLList(s []string) (argp.ListSource, error) {
+	if len(s) != 1 {
+		return nil, fmt.Errorf("invalid path")
+	}
+
+	t := mysqlList{}
+	if err := argp.LoadConfigFile(&t, s[0]); err != nil {
+		return nil, err
+	}
+
+	uri := fmt.Sprintf("%s:%s@%s/%s", t.User, t.Password, t.Hosts, t.Dbname)
+	db, err := sqlx.Open("mysql", uri)
+	if err != nil {
+		return nil, err
+	}
+	db.SetConnMaxLifetime(time.Minute)
+	db.SetConnMaxIdleTime(time.Minute)
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(10)
+	return argp.NewSQLList(db, t.Query, "")
+}
+
+// ...
+list.AddSource("mysql", newMySQLList)
+// ...
+```
+Use as `./bin -list mysql:list-config.toml`.
+
+#### Dict
+Use a dict source specified as type:dict. Default supported types are: static and inline.
+- Static takes a string and will return that as a value for all keys, e.g. `static:foobar`
+- Inline takes a map[string]string, e.g. `inline:{foo:1 bar:2}`
+
+```go
+dict := argp.NewDict([]string{"static:value"})
+cmd.AddOpt(&dict, "", "dict", "Dict")
+```
+
+You can add custom sources must like the mysqlList example above.
 
 ### Option tags
 The following struct will accept the following options and arguments:

@@ -2,13 +2,10 @@ package argp
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/pelletier/go-toml"
 )
 
 type ListSource interface {
@@ -17,10 +14,26 @@ type ListSource interface {
 	Close() error
 }
 
+type ListSourceFunc func([]string) (ListSource, error)
+
 // List is an option that loads a list of values from a source (such as mysql).
 type List struct {
 	ListSource
-	Values []string
+	Sources map[string]ListSourceFunc
+	Values  []string
+}
+
+func NewList(values []string) *List {
+	return &List{
+		Sources: map[string]ListSourceFunc{
+			"inline": NewInlineList,
+		},
+		Values: values,
+	}
+}
+
+func (list *List) AddSource(typ string, f ListSourceFunc) {
+	list.Sources[typ] = f
 }
 
 func (list *List) Help() (string, string) {
@@ -38,44 +51,36 @@ func (list *List) Scan(name string, s []string) (int, error) {
 
 	colon := strings.IndexByte(vals[0], ':')
 	if colon == -1 || (vals[0][0] < 'a' || 'z' < vals[0][0]) && (vals[0][0] < 'A' || 'Z' < vals[0][0]) {
-		return 0, fmt.Errorf("invalid value, expected type:table where type is e.g. mysql")
+		return 0, fmt.Errorf("invalid value, expected type:list where type is e.g. inline")
 	}
 	list.Values = vals
 
 	var err error
 	typ := vals[0][:colon]
 	vals[0] = vals[0][colon+1:]
-	switch typ {
-	case "inline":
-		list.ListSource, err = newInlineList(vals)
-	case "sqlite":
-		list.ListSource, err = newSQLiteList(vals)
-	case "mysql":
-		list.ListSource, err = newMySQLList(vals)
-	default:
-		return 0, fmt.Errorf("unknown table type: %s", typ)
-	}
-	if err != nil {
+	if ls, ok := list.Sources[typ]; !ok {
+		return 0, fmt.Errorf("unknown list type: %s", typ)
+	} else if list.ListSource, err = ls(vals); err != nil {
 		return 0, err
 	}
 	return len(vals), nil
 }
 
-type inlineList struct {
+type InlineList struct {
 	list []string
 }
 
-func newInlineList(s []string) (ListSource, error) {
+func NewInlineList(s []string) (ListSource, error) {
 	list := []string{}
 	if 0 < len(s) {
 		if _, err := scanValue(reflect.ValueOf(&list).Elem(), s); err != nil {
 			return nil, err
 		}
 	}
-	return &inlineList{list}, nil
+	return &InlineList{list}, nil
 }
 
-func (t *inlineList) Has(val string) bool {
+func (t *InlineList) Has(val string) bool {
 	for _, item := range t.list {
 		if item == val {
 			return true
@@ -84,21 +89,39 @@ func (t *inlineList) Has(val string) bool {
 	return false
 }
 
-func (t *inlineList) List() []string {
+func (t *InlineList) List() []string {
 	return t.list
 }
 
-func (t *inlineList) Close() error {
+func (t *InlineList) Close() error {
 	return nil
 }
 
-type sqlList struct {
+type SQLList struct {
 	db      *sqlx.DB
 	stmt    *sqlx.Stmt
 	stmtHas *sqlx.Stmt
 }
 
-func (t *sqlList) Has(val string) bool {
+func NewSQLList(db *sqlx.DB, query, queryHas string) (*SQLList, error) {
+	stmt, err := db.Preparex(query)
+	if err != nil {
+		return nil, err
+	}
+	var stmtHas *sqlx.Stmt
+	if queryHas != "" {
+		if stmtHas, err = db.Preparex(queryHas); err != nil {
+			return nil, err
+		}
+	}
+	return &SQLList{
+		db:      db,
+		stmt:    stmt,
+		stmtHas: stmtHas,
+	}, nil
+}
+
+func (t *SQLList) Has(val string) bool {
 	if t.stmtHas != nil {
 		return t.stmtHas.QueryRow(val).Err() == nil
 	}
@@ -112,7 +135,7 @@ func (t *sqlList) Has(val string) bool {
 	return false
 }
 
-func (t *sqlList) List() []string {
+func (t *SQLList) List() []string {
 	var list []string
 	if err := t.stmt.Select(&list); err != nil {
 		return nil
@@ -120,92 +143,60 @@ func (t *sqlList) List() []string {
 	return list
 }
 
-func (t *sqlList) Close() error {
+func (t *SQLList) Close() error {
 	return t.db.Close()
 }
 
-type sqliteList struct {
-	Path     string // can be :memory:
-	Query    string
-	QueryHas string
-}
-
-func newSQLiteList(s []string) (ListSource, error) {
-	if len(s) != 1 {
-		return nil, fmt.Errorf("invalid path")
-	}
-
-	b, err := os.ReadFile(s[0])
-	if err != nil {
-		return nil, err
-	}
-
-	t := sqliteList{}
-	if err := toml.Unmarshal(b, &t); err != nil {
-		return nil, err
-	}
-
-	db, err := sqlx.Open("sqlite", t.Path)
-	if err != nil {
-		return nil, err
-	}
-
-	stmt, err := db.Preparex(t.Query)
-	if err != nil {
-		return nil, err
-	}
-	var stmtHas *sqlx.Stmt
-	if t.QueryHas != "" {
-		if stmtHas, err = db.Preparex(t.QueryHas); err != nil {
-			return nil, err
-		}
-	}
-	return &sqlList{db, stmt, stmtHas}, nil
-}
-
-type mysqlList struct {
-	Host     string
-	User     string
-	Password string
-	Dbname   string
-	Query    string
-	QueryHas string
-}
-
-func newMySQLList(s []string) (ListSource, error) {
-	if len(s) != 1 {
-		return nil, fmt.Errorf("invalid path")
-	}
-
-	b, err := os.ReadFile(s[0])
-	if err != nil {
-		return nil, err
-	}
-
-	t := mysqlList{}
-	if err := toml.Unmarshal(b, &t); err != nil {
-		return nil, err
-	}
-
-	uri := fmt.Sprintf("%s:%s@%s/%s", t.User, t.Password, t.Host, t.Dbname)
-	db, err := sqlx.Open("mysql", uri)
-	if err != nil {
-		return nil, err
-	}
-	db.SetConnMaxLifetime(time.Minute)
-	db.SetConnMaxIdleTime(time.Minute)
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(10)
-
-	stmt, err := db.Preparex(t.Query)
-	if err != nil {
-		return nil, err
-	}
-	var stmtHas *sqlx.Stmt
-	if t.QueryHas != "" {
-		if stmtHas, err = db.Preparex(t.QueryHas); err != nil {
-			return nil, err
-		}
-	}
-	return &sqlList{db, stmt, stmtHas}, nil
-}
+//type sqliteList struct {
+//	Path     string // can be :memory:
+//	Query    string
+//	QueryHas string
+//}
+//
+//func newSQLiteList(s []string) (ListSource, error) {
+//	if len(s) != 1 {
+//		return nil, fmt.Errorf("invalid path")
+//	}
+//
+//	t := sqliteList{}
+//	if err := LoadConfigFile(&t, s[0]); err != nil {
+//		return nil, err
+//	}
+//
+//	db, err := sqlx.Open("sqlite", t.Path)
+//	if err != nil {
+//		return nil, err
+//	}
+//	return &sqlList{db, t.Query, t.QueryHas}, nil
+//}
+//
+//type mysqlList struct {
+//	Host     string
+//	User     string
+//	Password string
+//	Dbname   string
+//	Query    string
+//	QueryHas string
+//}
+//
+//func newMySQLList(s []string) (ListSource, error) {
+//	if len(s) != 1 {
+//		return nil, fmt.Errorf("invalid path")
+//	}
+//
+//	t := mysqlList{}
+//	if err := LoadConfigFile(&t, s[0]); err != nil {
+//		return nil, err
+//	}
+//
+//	uri := fmt.Sprintf("%s:%s@%s/%s", t.User, t.Password, t.Host, t.Dbname)
+//	db, err := sqlx.Open("mysql", uri)
+//	if err != nil {
+//		return nil, err
+//	}
+//	db.SetConnMaxLifetime(time.Minute)
+//	db.SetConnMaxIdleTime(time.Minute)
+//	db.SetMaxOpenConns(10)
+//	db.SetMaxIdleConns(10)
+//	return &sqlList{db, t.Query, t.QueryHas}, nil
+//}
