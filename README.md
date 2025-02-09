@@ -190,6 +190,8 @@ Use a list source specified as type:list. Default supported types are: inline.
 
 ```go
 list := argp.NewList(il)
+defer list.Close()
+
 cmd.AddOpt(&list, "", "list", "List")
 ```
 
@@ -238,6 +240,8 @@ Use a dict source specified as type:dict. Default supported types are: static an
 
 ```go
 dict := argp.NewDict([]string{"static:value"})
+defer dict.Close()
+
 cmd.AddOpt(&dict, "", "dict", "Dict")
 ```
 

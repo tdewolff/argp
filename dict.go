@@ -1,6 +1,7 @@
 package argp
 
 import (
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -9,8 +10,8 @@ import (
 )
 
 type DictSource interface {
-	Has(string) bool
-	Get(string) string
+	Has(string) (bool, error)
+	Get(string) (string, error)
 	Close() error
 }
 
@@ -67,6 +68,13 @@ func (dict *Dict) Scan(name string, s []string) (int, error) {
 	return len(vals), nil
 }
 
+func (dict *Dict) Close() error {
+	if dict.DictSource != nil {
+		return dict.DictSource.Close()
+	}
+	return nil
+}
+
 type StaticDict struct {
 	value string
 }
@@ -75,12 +83,12 @@ func NewStaticDict(s []string) (DictSource, error) {
 	return &StaticDict{strings.Join(s, " ")}, nil
 }
 
-func (t *StaticDict) Has(key string) bool {
-	return true
+func (t *StaticDict) Has(key string) (bool, error) {
+	return true, nil
 }
 
-func (t *StaticDict) Get(key string) string {
-	return t.value
+func (t *StaticDict) Get(key string) (string, error) {
+	return t.value, nil
 }
 
 func (t *StaticDict) Close() error {
@@ -101,13 +109,17 @@ func NewInlineDict(s []string) (DictSource, error) {
 	return &InlineDict{dict}, nil
 }
 
-func (t *InlineDict) Has(key string) bool {
+func (t *InlineDict) Has(key string) (bool, error) {
 	_, ok := t.dict[key]
-	return ok
+	return ok, nil
 }
 
-func (t *InlineDict) Get(key string) string {
-	return t.dict[key]
+func (t *InlineDict) Get(key string) (string, error) {
+	v, ok := t.dict[key]
+	if !ok {
+		return key, nil
+	}
+	return v, nil
 }
 
 func (t *InlineDict) Close() error {
@@ -115,31 +127,37 @@ func (t *InlineDict) Close() error {
 }
 
 type SQLDict struct {
-	db   *sqlx.DB
-	stmt *sqlx.Stmt
+	db    *sqlx.DB
+	query string
 }
 
 func NewSQLDict(db *sqlx.DB, query string) (*SQLDict, error) {
-	stmt, err := db.Preparex(query)
-	if err != nil {
-		return nil, err
-	}
 	return &SQLDict{
-		db:   db,
-		stmt: stmt,
+		db:    db,
+		query: query,
 	}, nil
 }
 
-func (t *SQLDict) Has(key string) bool {
-	return t.stmt.QueryRow(key).Err() == nil
+func (t *SQLDict) Has(key string) (bool, error) {
+	if t.query == "" {
+		return false, nil
+	} else if err := t.db.QueryRow(t.query, key).Err(); err != nil && err != sql.ErrNoRows {
+		return false, err
+	}
+	return true, nil
 }
 
-func (t *SQLDict) Get(key string) string {
+func (t *SQLDict) Get(key string) (string, error) {
 	var val string // TODO: does this work for ints? Or should we use interface{}?
-	if err := t.stmt.QueryRow(key).Scan(&val); err != nil {
-		return ""
+	if t.query == "" {
+		return "", nil
+	} else if err := t.db.Get(&val, t.query, key); err != nil && err != sql.ErrNoRows {
+		return "", err
+	} else if err == sql.ErrNoRows {
+		return key, nil
+	} else {
+		return val, nil
 	}
-	return val
 }
 
 func (t *SQLDict) Close() error {

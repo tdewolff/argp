@@ -1,16 +1,18 @@
 package argp
 
 import (
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
 type ListSource interface {
-	Has(string) bool
-	List() []string
+	Has(string) (bool, error)
+	List() ([]string, error)
 	Close() error
 }
 
@@ -66,6 +68,13 @@ func (list *List) Scan(name string, s []string) (int, error) {
 	return len(vals), nil
 }
 
+func (list *List) Close() error {
+	if list.ListSource != nil {
+		return list.ListSource.Close()
+	}
+	return nil
+}
+
 type InlineList struct {
 	list []string
 }
@@ -80,17 +89,17 @@ func NewInlineList(s []string) (ListSource, error) {
 	return &InlineList{list}, nil
 }
 
-func (t *InlineList) Has(val string) bool {
+func (t *InlineList) Has(val string) (bool, error) {
 	for _, item := range t.list {
 		if item == val {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (t *InlineList) List() []string {
-	return t.list
+func (t *InlineList) List() ([]string, error) {
+	return t.list, nil
 }
 
 func (t *InlineList) Close() error {
@@ -98,49 +107,56 @@ func (t *InlineList) Close() error {
 }
 
 type SQLList struct {
-	db      *sqlx.DB
-	stmt    *sqlx.Stmt
-	stmtHas *sqlx.Stmt
+	db       *sqlx.DB
+	query    string
+	queryHas string
+	cacheDur time.Duration
+
+	cache     []string
+	lastQuery time.Time
 }
 
-func NewSQLList(db *sqlx.DB, query, queryHas string) (*SQLList, error) {
-	stmt, err := db.Preparex(query)
-	if err != nil {
-		return nil, err
-	}
-	var stmtHas *sqlx.Stmt
-	if queryHas != "" {
-		if stmtHas, err = db.Preparex(queryHas); err != nil {
-			return nil, err
-		}
-	}
+func NewSQLList(db *sqlx.DB, query, queryHas string, cacheDur time.Duration) (*SQLList, error) {
 	return &SQLList{
-		db:      db,
-		stmt:    stmt,
-		stmtHas: stmtHas,
+		db:       db,
+		query:    query,
+		queryHas: queryHas,
+		cacheDur: cacheDur,
 	}, nil
 }
 
-func (t *SQLList) Has(val string) bool {
-	if t.stmtHas != nil {
-		return t.stmtHas.QueryRow(val).Err() == nil
-	}
-
-	list := t.List()
-	for _, item := range list {
-		if item == val {
-			return true
+func (t *SQLList) Has(val string) (bool, error) {
+	if t.queryHas != "" {
+		if err := t.db.QueryRow(t.queryHas, val).Err(); err != nil && err != sql.ErrNoRows {
+			return false, err
+		} else {
+			return err != sql.ErrNoRows, nil
 		}
 	}
-	return false
+	list, err := t.List()
+	if err != nil {
+		return false, err
+	}
+	for _, item := range list {
+		if item == val {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
-func (t *SQLList) List() []string {
+func (t *SQLList) List() ([]string, error) {
 	var list []string
-	if err := t.stmt.Select(&list); err != nil {
-		return nil
+	if t.query == "" {
+		return nil, nil
+	} else if time.Since(t.lastQuery) < t.cacheDur || t.cacheDur < 0 && !t.lastQuery.IsZero() {
+		return t.cache, nil
+	} else if err := t.db.Select(&list, t.query); err != nil {
+		return nil, err
 	}
-	return list
+	t.cache = list
+	t.lastQuery = time.Now()
+	return list, nil
 }
 
 func (t *SQLList) Close() error {
