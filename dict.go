@@ -34,6 +34,10 @@ func NewDict(values []string) *Dict {
 	}
 }
 
+func (dict *Dict) Valid() bool {
+	return dict.DictSource != nil
+}
+
 func (dict *Dict) AddSource(typ string, f DictSourceFunc) {
 	dict.Sources[typ] = f
 }
@@ -150,7 +154,7 @@ func (t *SQLDict) Has(key string) (bool, error) {
 func (t *SQLDict) Get(key string) (string, error) {
 	var val string // TODO: does this work for ints? Or should we use interface{}?
 	if t.query == "" {
-		return "", nil
+		return key, nil
 	} else if err := t.db.Get(&val, t.query, key); err != nil && err != sql.ErrNoRows {
 		return "", err
 	} else if err == sql.ErrNoRows {

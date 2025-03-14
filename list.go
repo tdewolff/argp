@@ -34,6 +34,10 @@ func NewList(values []string) *List {
 	}
 }
 
+func (list *List) Valid() bool {
+	return list.ListSource != nil
+}
+
 func (list *List) AddSource(typ string, f ListSourceFunc) {
 	list.Sources[typ] = f
 }
