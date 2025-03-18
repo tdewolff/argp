@@ -315,6 +315,20 @@ func TestArgpAdd(t *testing.T) {
 	test.Error(t, err)
 }
 
+func TestArgpAddRest(t *testing.T) {
+	var rest []string
+	argp := New("description")
+	argp.AddRest(&rest, "rest", "description")
+
+	_, _, err := argp.parse([]string{"file1.txt", "file2.txt", "file3.txt"})
+	test.Error(t, err)
+	test.T(t, rest, []string{"file1.txt", "file2.txt", "file3.txt"})
+
+	_, _, err = argp.parse([]string{})
+	test.Error(t, err)
+	test.T(t, rest, []string{})
+}
+
 func TestArgpUTF8(t *testing.T) {
 	var v bool
 	argp := New("description")
