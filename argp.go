@@ -72,7 +72,7 @@ func New(description string) *Argp {
 	return NewCmd(nil, description)
 }
 
-// NewCmd returns a new command parser that invokes the Run method of the passed command structure. The `Argp.Parse()` function will not return and call either os.Exit(0) or os.Exit(1).
+// NewCmd returns a new command parser that invokes the Run method of the passed command structure. The `Argp.Parse()` function will not return and will call os.Exit() with 0, 1 or 2 as the argument.
 func NewCmd(cmd Cmd, description string) *Argp {
 	argp := &Argp{
 		Cmd:         cmd,
@@ -588,7 +588,7 @@ func (argp *Argp) Parse() {
 	if err != nil {
 		fmt.Printf("%v\n\n", err)
 		cmd.PrintHelp()
-		os.Exit(1)
+		os.Exit(2)
 	} else if cmd.help || cmd != argp && cmd.Cmd == nil {
 		cmd.PrintHelp()
 		os.Exit(0)
@@ -600,16 +600,18 @@ func (argp *Argp) Parse() {
 			}
 			fmt.Printf("%s: %v\n\n", msg, strings.Join(rest, " "))
 			cmd.PrintHelp()
-			os.Exit(1)
+			os.Exit(2)
 		} else if err := cmd.Cmd.Run(); err != nil {
+			// Exit with status 2 on bad usage and with status 1 when we don't know the nature of the error.
 			if err == ShowUsage {
 				cmd.PrintHelp()
 			} else if argp.Error != nil {
 				argp.Error.Println(err)
 			} else {
 				fmt.Printf("ERROR: %v\n", err)
+				os.Exit(1)
 			}
-			os.Exit(1)
+			os.Exit(2)
 		} else {
 			os.Exit(0)
 		}
