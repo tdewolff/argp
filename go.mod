@@ -1,6 +1,6 @@
 module github.com/tdewolff/argp
 
-go 1.24.1
+go 1.22
 
 require (
 	github.com/jmoiron/sqlx v1.4.0

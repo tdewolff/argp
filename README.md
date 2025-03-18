@@ -27,7 +27,7 @@ GNU command line argument rules:
 *See also [github.com/tdewolff/prompt](https://github.com/tdewolff/prompt) for a command line prompter.*
 
 ## Installation
-Make sure you have [Git](https://git-scm.com/) and [Go](https://golang.org/dl/) (1.13 or higher) installed, run
+Make sure you have [Git](https://git-scm.com/) and [Go](https://golang.org/dl/) (1.22 or higher) installed, run
 ```
 mkdir Project
 cd Project
