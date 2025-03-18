@@ -60,7 +60,8 @@ func main() {
     argp.AddOpt(argp.Count{&verbose}, "v", "verbose", "Increase verbosity, eg. -vvv")
     argp.AddOpt(&output, "o", "output", "Output file name")
     argp.AddOpt(&size, "", "size", "Image size")
-    argp.AddArg(&input, "input", "Input file name size")
+    argp.AddArg(&input, "input", "Input file name")
+    argp.AddRest(&files, "files", "Additional input files")
     argp.Parse()
 
     // ...
@@ -110,6 +111,15 @@ type Command struct {
 func (cmd *Command) Run() error {
     // ...
 }
+```
+
+### Arguments
+```go
+var input string
+cmd.AddArg(&input, "input", "Input file name")
+
+var files []string
+cmd.AddRest(&files, "files", "Additional input files")
 ```
 
 ### Options
