@@ -45,6 +45,7 @@ import (
 ## Examples
 ### Default usage
 A regular command with short and long options.
+See [`cmd/test/main.go`](cmd/test/main.go).
 
 ```go
 package main
@@ -52,17 +53,19 @@ package main
 import "github.com/tdewolff/argp"
 
 func main() {
-    var verbose bool
+    var verbose int
+    var input string
     var output string
+    var files []string
     size := 512 // default value
 
-    argp := argp.New("CLI tool description")
-    argp.AddOpt(argp.Count{&verbose}, "v", "verbose", "Increase verbosity, eg. -vvv")
-    argp.AddOpt(&output, "o", "output", "Output file name")
-    argp.AddOpt(&size, "", "size", "Image size")
-    argp.AddArg(&input, "input", "Input file name")
-    argp.AddRest(&files, "files", "Additional input files")
-    argp.Parse()
+    cmd := argp.New("CLI tool description")
+    cmd.AddOpt(argp.Count{&verbose}, "v", "verbose", "Increase verbosity, eg. -vvv")
+    cmd.AddOpt(&output, "o", "output", "Output file name")
+    cmd.AddOpt(&size, "", "size", "Image size")
+    cmd.AddArg(&input, "input", "Input file name")
+    cmd.AddRest(&files, "files", "Additional files")
+    cmd.Parse()
 
     // ...
 }
@@ -71,13 +74,17 @@ func main() {
 with help output
 
 ```
-Usage: test [options]
+Usage: test [options] input files...
 
 Options:
-  -h, --help     Help
-  -o, --output   Output file name
-      --size     Image size
-  -v, --verbose
+  -h, --help          Help
+  -o, --output string Output file name
+      --size=512 int  Image size
+  -v, --verbose int   Increase verbosity, eg. -vvv
+
+Arguments:
+  input     Input file name
+  files     Additional files
 ```
 
 ### Sub commands
