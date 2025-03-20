@@ -586,7 +586,7 @@ func (argp *Argp) PrintHelp() {
 func (argp *Argp) Parse() {
 	cmd, rest, err := argp.parse(os.Args[1:])
 	if err != nil {
-		fmt.Printf("%v\n\n", err)
+		fmt.Fprintf(os.Stderr, "%v\n\n", err)
 		cmd.PrintHelp()
 		os.Exit(2)
 	} else if cmd.help || cmd != argp && cmd.Cmd == nil {
@@ -598,7 +598,7 @@ func (argp *Argp) Parse() {
 			if len(rest) == 1 {
 				msg = "unknown argument"
 			}
-			fmt.Printf("%s: %v\n\n", msg, strings.Join(rest, " "))
+			fmt.Fprintf(os.Stderr, "%s: %v\n\n", msg, strings.Join(rest, " "))
 			cmd.PrintHelp()
 			os.Exit(2)
 		} else if err := cmd.Cmd.Run(); err != nil {
@@ -608,7 +608,7 @@ func (argp *Argp) Parse() {
 			} else if argp.Error != nil {
 				argp.Error.Println(err)
 			} else {
-				fmt.Printf("ERROR: %v\n", err)
+				fmt.Fprintf(os.Stderr,"ERROR: %v\n", err)
 				os.Exit(1)
 			}
 			os.Exit(2)
