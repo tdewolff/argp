@@ -524,7 +524,7 @@ func (argp *Argp) PrintHelp() {
 		fmt.Printf("\nCommands:\n")
 		nMax := 0
 		cmds := []string{}
-		for cmd, _ := range argp.cmds {
+		for cmd := range argp.cmds {
 			if nMax < 2+len(cmd) {
 				nMax = 2 + len(cmd)
 			}
@@ -798,7 +798,7 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 			}
 			name = name[i+1 : j]
 		} else {
-			j = strings.IndexByte(name[i+1:], ']')
+			j = indexByte(name[i+1:], ']')
 			if j == -1 {
 				return 0, fmt.Errorf("expected terminating ] in variable index")
 			}
@@ -865,6 +865,17 @@ func scanVar(v reflect.Value, name string, s []string) (int, error) {
 		return 0, nil
 	}
 	return n, err
+}
+
+func indexByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' {
+			i++
+		} else if s[i] == c {
+			return i
+		}
+	}
+	return -1
 }
 
 // truncEnd splits the arguments and returns values for an array/slice/map/struct and remaining
@@ -1012,7 +1023,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 				if sVal == nil || split {
 					return 0, fmt.Errorf("%v index %v: invalid value", typ, j)
 				}
-			} else if idx := strings.IndexByte(s[0], ','); idx != -1 && comma {
+			} else if idx := indexByte(s[0], ','); idx != -1 && comma {
 				sVal = []string{s[0][:idx]}
 				s[0] = s[0][idx:]
 			} else {
@@ -1073,7 +1084,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 				} else {
 					s[0] = s[0][1:]
 				}
-			} else if idx := strings.IndexByte(s[0], ':'); idx == -1 {
+			} else if idx := indexByte(s[0], ':'); idx == -1 {
 				sKey = []string{s[0]}
 				s = s[1:]
 				for 0 < len(s) && len(s[0]) == 0 {
@@ -1108,7 +1119,7 @@ func scanValue(v reflect.Value, s []string) (int, error) {
 				if sVal == nil || split {
 					return 0, fmt.Errorf("map key %v: invalid value", index)
 				}
-			} else if idx := strings.IndexByte(s[0], ','); idx != -1 {
+			} else if idx := indexByte(s[0], ','); idx != -1 {
 				sVal = []string{s[0][:idx]}
 				s[0] = s[0][idx+1:]
 			} else {
